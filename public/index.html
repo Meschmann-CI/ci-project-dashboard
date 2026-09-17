@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mission Control</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%A7%AD%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- macOS and iOS use their own SF Pro and never fetch this. Windows falls to Inter. -->
+<link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<div class="atmosphere" aria-hidden="true"></div>
+
+<header class="hero">
+  <div class="hero-text">
+    <div class="eyebrow" id="today"></div>
+    <h1 id="greeting">Mission control<span class="period">.</span></h1>
+    <p class="summary" id="summary">Loading…</p>
+  </div>
+  <div class="hero-actions">
+    <button id="scanStatus" class="pill pill-status" title="Rescan">
+      <span class="dot"></span><span class="scan-text">…</span>
+    </button>
+    <button id="newBtn" class="pill pill-solid">＋ New project</button>
+  </div>
+</header>
+
+<nav class="toolbar">
+  <div class="seg" id="viewSeg" role="tablist">
+    <button data-view="tiles" class="on" role="tab">Tiles</button>
+    <button data-view="queue" role="tab">Needs you <span class="count" id="queueCount">0</span></button>
+    <button data-view="board" role="tab">Board</button>
+  </div>
+  <div class="chips" id="kindChips"></div>
+  <span class="grow"></span>
+  <input id="search" type="search" placeholder="Search  /" autocomplete="off">
+  <select id="sort" title="Sort">
+    <option value="attention">Needs attention first</option>
+    <option value="recent">Recently active</option>
+    <option value="priority">Priority</option>
+    <option value="name">Name</option>
+  </select>
+  <label class="check"><input type="checkbox" id="showArchived"> Archived</label>
+</nav>
+
+<main>
+  <section id="viewTiles" class="view">
+    <div id="banner" class="banner" hidden></div>
+    <div id="tiles" class="bands"></div>
+  </section>
+
+  <section id="viewQueue" class="view" hidden>
+    <div id="queue" class="queue"></div>
+  </section>
+
+  <section id="viewBoard" class="view" hidden>
+    <div id="board" class="board"></div>
+  </section>
+</main>
+
+<div id="scrim" class="scrim" hidden></div>
+<aside id="drawer" class="drawer" hidden aria-label="Project detail"></aside>
+<div id="toast" class="toast" hidden></div>
+
+<script src="/app.js"></script>
+</body>
+</html>

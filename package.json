@@ -1,0 +1,16 @@
+{
+  "name": "ci-project-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Dashboard of every tool and project in flight: stage, next step, and what needs attention.",
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "seed": "node src/seed.js",
+    "scan": "node src/scan-cli.js",
+    "test": "node --check server.js && node --check src/db.js && node --check src/scan.js && node --check public/app.js && node src/test.js"
+  },
+  "engines": { "node": ">=22" },
+  "dependencies": {}
+}
