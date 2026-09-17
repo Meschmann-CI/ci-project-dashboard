@@ -86,6 +86,11 @@ async function api(req, res, url) {
     }
   }
 
+  if (rest[0] === 'done' && method === 'GET') {
+    const limit = Math.min(2000, Math.max(1, Number(url.searchParams.get('limit')) || 500));
+    return send(res, 200, { items: db.listDone({ limit }) });
+  }
+
   if (rest[0] === 'projects') {
     if (!rest[1] && method === 'GET') {
       const includeArchived = url.searchParams.get('archived') === '1';

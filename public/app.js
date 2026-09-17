@@ -4,6 +4,7 @@
 const state = {
   projects: [],
   queue: [],
+  done: [],          // every completed step, newest first, from /api/done
   meta: { stages: [], kinds: [], kind_info: [], colors: [], rules: [], owner_name: '' },
   scan: {},
   view: 'tiles',
@@ -102,8 +103,14 @@ async function loadMeta() {
 }
 
 async function load() {
-  const data = await api('/api/projects' + (state.filters.archived ? '?archived=1' : ''));
+  const [data, done] = await Promise.all([
+    api('/api/projects' + (state.filters.archived ? '?archived=1' : '')),
+    // The done log is a nicety. If the server is an older build without this
+    // route, the board must still load rather than fail with it.
+    api('/api/done').catch(() => ({ items: [] })),
+  ]);
   state.projects = data.projects; state.queue = data.queue; state.scan = data.scan;
+  state.done = done.items || [];
   render();
 }
 
@@ -125,6 +132,8 @@ function render() {
   renderBoard(visible);
   const n = state.queue.length;
   const qc = $('#queueCount'); qc.textContent = n; qc.className = 'count' + (n ? '' : ' zero');
+  renderDone();
+  $('#doneCount').textContent = doneStats(state.done).thisWeek;
   if (state.openId && state.detail && state.detail.id === state.openId) renderDrawer(state.detail);
 }
 
@@ -144,11 +153,13 @@ function renderHero() {
   const motion = active.filter((p) => bandOf(p) === 'motion').length;
   const stalled = active.filter((p) => bandOf(p) === 'stalled').length;
   const parked = active.filter((p) => bandOf(p) === 'parked').length;
+  const ds = doneStats(state.done);
   $('#summary').innerHTML =
     `<b>${motion}</b> in motion · ` +
     (stalled ? `<span class="need">${stalled} need${stalled === 1 ? 's' : ''} a next step</span>` : `<b>0</b> stalled`) +
     ` · <b>${parked}</b> live &amp; parked · ` +
-    (need ? `<span class="need">${need} need${need === 1 ? 's' : ''} you</span>` : `<b style="color:var(--ok)">nothing needs you</b>`);
+    (need ? `<span class="need">${need} need${need === 1 ? 's' : ''} you</span>` : `<b style="color:var(--ok)">nothing needs you</b>`) +
+    (ds.thisWeek ? ` · <b class="good">${ds.thisWeek}</b> done this week` : '');
 }
 
 function renderScan() {
@@ -389,6 +400,7 @@ function setView(v) {
   state.view = v;
   document.querySelectorAll('#viewSeg button').forEach((b) => b.classList.toggle('on', b.dataset.view === v));
   $('#viewTiles').hidden = v !== 'tiles'; $('#viewQueue').hidden = v !== 'queue'; $('#viewBoard').hidden = v !== 'board';
+  $('#viewDone').hidden = v !== 'done';
   try { localStorage.setItem('mc.view', v); } catch { /* fine */ }
 }
 
@@ -699,6 +711,105 @@ function fsEvidence(f) {
   if (f.exists === false) return 'folder not found';
   const bits = []; if (f.newest_file) bits.push(`<b>${escapeHtml(f.newest_file)}</b>`); if (f.files != null) bits.push(`${f.files} files${f.truncated ? '+' : ''}`);
   return bits.join(' · ') || 'empty folder';
+}
+
+// ------------------------------------------------------------------ done log
+
+const DAY = 86400000;
+const pad2 = (n) => String(n).padStart(2, '0');
+// Local calendar day. A step ticked at 11pm belongs to today, not tomorrow UTC.
+function dayKey(d) { d = d instanceof Date ? d : new Date(d); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; }
+function startOfDay(d) { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; }
+function startOfWeek(d) { const x = startOfDay(d); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x; } // Monday
+const fmtDay = (d) => d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+const fmtTime = (iso) => new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+
+// The search box and kind chips apply here too, so "what did I finish on
+// Sitecap" is one keystroke away.
+function doneVisible() {
+  const { q, kind } = state.filters; const needle = q.trim().toLowerCase();
+  return (state.done || []).filter((r) => {
+    if (kind && r.kind !== kind) return false;
+    if (needle && !`${r.text} ${r.project_name}`.toLowerCase().includes(needle)) return false;
+    return true;
+  });
+}
+
+function doneStats(items) {
+  const now = new Date(); const today = startOfDay(now); const week = startOfWeek(now);
+  const byDay = new Map();
+  for (const r of items) { const k = dayKey(r.done_at); byDay.set(k, (byDay.get(k) || 0) + 1); }
+  const strip = [];
+  for (let i = 13; i >= 0; i -= 1) { const d = new Date(today.getTime() - i * DAY); strip.push({ date: d, n: byDay.get(dayKey(d)) || 0 }); }
+  // Consecutive days with at least one tick, counting back from today. A blank
+  // today does not end the run, since today is still in progress.
+  let streak = 0;
+  for (let i = 0; i < 3650; i += 1) {
+    const n = byDay.get(dayKey(new Date(today.getTime() - i * DAY))) || 0;
+    if (n) streak += 1; else if (i > 0) break;
+  }
+  const since = (d) => items.filter((r) => new Date(r.done_at) >= d).length;
+  return { today: byDay.get(dayKey(today)) || 0, thisWeek: since(week), last30: since(new Date(today.getTime() - 29 * DAY)), total: items.length, streak, strip, byDay };
+}
+
+function renderDone() {
+  const box = $('#done'); box.innerHTML = '';
+  const items = doneVisible();
+  const s = doneStats(items);
+
+  const stats = el('div', 'done-stats');
+  for (const [n, lbl] of [[s.today, 'today'], [s.thisWeek, 'this week'], [s.last30, 'last 30 days'], [s.streak, s.streak === 1 ? 'day streak' : 'day streak']]) {
+    const t = el('div', 'stat'); t.appendChild(el('div', 'n', String(n))); t.appendChild(el('div', 'l', lbl)); stats.appendChild(t);
+  }
+  box.appendChild(stats);
+
+  const max = Math.max(1, ...s.strip.map((d) => d.n));
+  const strip = el('div', 'strip');
+  for (const d of s.strip) {
+    const cell = el('div', 'cell' + (d.n ? ' has' : ''));
+    cell.style.setProperty('--f', (d.n / max).toFixed(2));
+    cell.title = `${fmtDay(d.date)}: ${d.n} done`;
+    cell.appendChild(el('span', 'wd', d.date.toLocaleDateString(undefined, { weekday: 'narrow' })));
+    if (d.n) cell.appendChild(el('span', 'nn', String(d.n)));
+    strip.appendChild(cell);
+  }
+  box.appendChild(strip);
+
+  if (!items.length) {
+    const e = el('div', 'empty', 'Nothing ticked off yet.');
+    e.appendChild(el('small', null, state.done.length ? 'Nothing matches the current filter.' : 'Check a step on any project and it lands here, dated.'));
+    box.appendChild(e); return;
+  }
+
+  const list = el('div', 'donelog');
+  const todayKey = dayKey(new Date()); const yKey = dayKey(new Date(Date.now() - DAY));
+  let lastDay = null; let lastWeek = null;
+  for (const r of items) {
+    const d = new Date(r.done_at); const k = dayKey(d); const wkStart = startOfWeek(d); const wk = dayKey(wkStart);
+    if (wk !== lastWeek) {
+      lastWeek = wk;
+      const wn = items.filter((x) => dayKey(startOfWeek(new Date(x.done_at))) === wk).length;
+      const h = el('div', 'doneweek');
+      h.appendChild(el('span', null, wk === dayKey(startOfWeek(new Date())) ? 'This week' : `Week of ${wkStart.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`));
+      h.appendChild(el('span', 'wn', `${wn} done`));
+      list.appendChild(h);
+    }
+    if (k !== lastDay) {
+      lastDay = k;
+      const h = el('div', 'doneday');
+      h.appendChild(el('span', null, k === todayKey ? 'Today' : k === yKey ? 'Yesterday' : fmtDay(d)));
+      h.appendChild(el('span', 'dn', String(s.byDay.get(k))));
+      list.appendChild(h);
+    }
+    const row = el('div', 'donerow'); row.dataset.color = r.color || 'cocoa';
+    row.appendChild(el('span', 'dcheck', '✓'));
+    row.appendChild(el('span', 'face', r.icon || '•'));
+    const body = el('div', 'body'); body.appendChild(el('div', 'txt', r.text)); body.appendChild(el('div', 'proj', r.project_name)); row.appendChild(body);
+    row.appendChild(el('span', 'time', fmtTime(r.done_at)));
+    row.addEventListener('click', () => openDrawer(r.project_id));
+    list.appendChild(row);
+  }
+  box.appendChild(list);
 }
 
 // ------------------------------------------------------------------ misc

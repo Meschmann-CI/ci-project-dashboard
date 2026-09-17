@@ -76,7 +76,13 @@ When the last open step is checked off, the tile goes back to "Needs a next step
 
 Under the hood, steps live in their own table and `projects.next_step` is a cached mirror of the top open one, kept in sync on every change. The attention rules never needed to learn about checklists. The old single-string `next_step` values were migrated into one step each on first start.
 
-Two other views sit behind the toggle: **Needs you** is the full attention queue as a list, and **Board** is a kanban by stage with drag-and-drop. The view you leave it on is remembered.
+Three other views sit behind the toggle. **Needs you** is the full attention queue as a list. **Board** is a kanban by stage with drag-and-drop. **Done** is the running record of everything you have ticked off, across every project, so progress is visible rather than just the backlog. The view you leave it on is remembered.
+
+## The Done view
+
+Four numbers at the top: today, this week (Monday start), the last 30 days, and the current streak of days with at least one tick. A blank today does not break the streak, since today is still in progress. Under that, a 14-day strip shaded by how many steps landed each day, then the list itself grouped by week and by day, newest first. Each row shows the step, the project it belonged to, and the time. Click a row to open that project.
+
+The search box and kind chips apply here too, so "what did I finish on Sitecap" is one keystroke. The count on the Done tab and the "N done this week" in the header both count the current week. Days are grouped in your local time zone, so an 11pm tick counts for today. Completed steps on archived projects still appear, because finished work is finished work. Reopening a step removes it from the log.
 
 The look is deliberately not on-brand. This is a personal tool, so it borrows Apple's rather than CI's: white shading to Apple's off-white grey down the page, SF Pro where it exists and Inter as the Windows stand-in, and the ten project hues taken from Apple's system colours. Colour is an accent on each tile, at the icon and the edge, not a wash over the card. It follows your system light or dark setting, and dark mode is a true near-black.
 

@@ -637,3 +637,50 @@ main { max-width: 1500px; margin: 0 auto; padding: 0 36px 80px; }
 .kindbtn.on { border-color: var(--ink); background: var(--card); color: var(--ink); box-shadow: var(--shadow); }
 .kindblurb { min-height: 2.2em; margin-top: 7px; }
 @media (max-width: 760px) { .kindpick { grid-template-columns: repeat(2, 1fr); } }
+
+/* ---------- done log ---------- */
+/* Green is the "good" colour, so completed work wears it here and nowhere new. */
+.count.good { background: var(--ok); color: #fff; }
+.summary .good { color: var(--ok); }
+.done-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
+.stat { background: var(--card); border: 1px solid var(--line); border-radius: var(--r); padding: 16px 18px; box-shadow: var(--shadow); }
+.stat .n { font-family: var(--display); font-weight: 700; font-size: 34px; letter-spacing: -.03em; line-height: 1; }
+.stat .l { margin-top: 6px; font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.strip { display: grid; grid-template-columns: repeat(14, 1fr); gap: 6px; margin-bottom: 26px; }
+.strip .cell {
+  --f: 0; aspect-ratio: 1; border-radius: 9px; position: relative;
+  background: var(--paper-2); border: 1px solid var(--line);
+  display: grid; place-items: center; color: var(--faint); font-weight: 700;
+}
+.strip .cell.has {
+  background: color-mix(in oklab, var(--ok) calc(22% + var(--f) * 60%), var(--card));
+  border-color: transparent; color: var(--ink);
+}
+.strip .cell .wd { position: absolute; top: 4px; left: 6px; font-size: 9.5px; opacity: .75; }
+.strip .cell .nn { font-family: var(--display); font-size: 17px; letter-spacing: -.02em; }
+.donelog { display: grid; gap: 6px; max-width: 900px; }
+.doneweek {
+  display: flex; justify-content: space-between; align-items: baseline; margin: 20px 4px 4px;
+  font-family: var(--display); font-weight: 700; font-size: 20px; letter-spacing: -.02em;
+}
+.doneweek:first-child { margin-top: 0; }
+.doneweek .wn { font-family: var(--body); font-size: 12.5px; font-weight: 700; color: var(--ok); }
+.doneday {
+  display: flex; gap: 8px; align-items: baseline; margin: 10px 4px 2px;
+  font-size: 11.5px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; color: var(--muted);
+}
+.doneday .dn { color: var(--faint); font-weight: 700; }
+/* No --c default on .donerow: the generic [data-color] rules above would lose
+   to it, exactly the bug the drawer had. app.js always sets data-color. */
+.donerow {
+  display: grid; grid-template-columns: 16px 34px 1fr auto; gap: 12px; align-items: center;
+  padding: 10px 14px; border-radius: 12px; background: var(--card); border: 1px solid var(--line);
+  cursor: pointer; transition: transform .12s, border-color .12s;
+}
+.donerow:hover { transform: translateX(3px); border-color: var(--line-2); }
+.donerow .dcheck { color: var(--ok); font-weight: 900; }
+.donerow .face { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; font-size: 18px; background: color-mix(in oklab, var(--c) 30%, var(--card)); }
+.donerow .txt { font-weight: 600; word-break: break-word; }
+.donerow .proj { font-size: 12px; color: var(--muted); margin-top: 1px; }
+.donerow .time { font-size: 12px; color: var(--faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
+@media (max-width: 760px) { .done-stats { grid-template-columns: repeat(2, 1fr); } .strip { grid-template-columns: repeat(7, 1fr); } }

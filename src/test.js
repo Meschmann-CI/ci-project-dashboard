@@ -321,6 +321,19 @@ test('an empty step is refused', () => {
   assert.throws(() => db.addStep(p.id, '   '), /required/);
 });
 
+test('the done log lists completed steps newest first with their project, and forgets reopened ones', () => {
+  const p = db.createProject({ name: 'T10', stage: 'building', steps: ['first', 'second'], icon: '🧪', color: 'mint' });
+  db.updateStep(p.id, p.steps[0].id, { done: true });
+  db.updateStep(p.id, p.steps[1].id, { done: true });
+  const mine = db.listDone().filter((r) => r.project_id === p.id);
+  assert.deepStrictEqual(mine.map((r) => r.text), ['second', 'first']);
+  assert.strictEqual(mine[0].project_name, 'T10');
+  assert.strictEqual(mine[0].icon, '🧪');
+  assert.ok(mine[0].done_at, 'carries the completion timestamp');
+  db.updateStep(p.id, p.steps[1].id, { done: false });
+  assert.deepStrictEqual(db.listDone().filter((r) => r.project_id === p.id).map((r) => r.text), ['first']);
+});
+
 // Tidy up the throwaway database.
 try { db.open().close(); } catch { /* already closed */ }
 for (const suffix of ['', '-wal', '-shm', '-journal']) {

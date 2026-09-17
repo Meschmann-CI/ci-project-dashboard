@@ -116,6 +116,8 @@ POST   /api/projects/:id/steps            add a step (returns the full project)
 PATCH  /api/projects/:id/steps/:sid       {text?, done?}  completing logs 'Completed: …'
 DELETE /api/projects/:id/steps/:sid
 POST   /api/projects/:id/steps/reorder    {ids: [...]}  open steps in the wanted order
+GET    /api/done?limit=500                every completed step across all projects, newest first,
+                                          joined to its project; the Done view groups by local day
 GET    /api/projects              list with activity and computed attention flags
 POST   /api/projects              create
 GET    /api/projects/:id          full record with log

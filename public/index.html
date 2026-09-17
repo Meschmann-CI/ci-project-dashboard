@@ -34,6 +34,7 @@
     <button data-view="tiles" class="on" role="tab">Tiles</button>
     <button data-view="queue" role="tab">Needs you <span class="count" id="queueCount">0</span></button>
     <button data-view="board" role="tab">Board</button>
+    <button data-view="done" role="tab" title="Everything ticked off, by day">Done <span class="count good" id="doneCount">0</span></button>
   </div>
   <div class="chips" id="kindChips"></div>
   <span class="grow"></span>
@@ -59,6 +60,10 @@
 
   <section id="viewBoard" class="view" hidden>
     <div id="board" class="board"></div>
+  </section>
+
+  <section id="viewDone" class="view" hidden>
+    <div id="done" class="done"></div>
   </section>
 </main>
 

@@ -365,6 +365,20 @@ function deleteStep(projectId, stepId) {
   return true;
 }
 
+// Every completed step across every project, newest first, with enough of the
+// project attached to draw a row. Archived projects are included on purpose:
+// finished work is finished work. Grouping by day happens in the browser, in
+// the viewer's own time zone, so an 11pm tick counts for today rather than
+// tomorrow UTC.
+function listDone({ limit = 500 } = {}) {
+  return rows(`SELECT s.id, s.text, s.done_at, s.project_id,
+                      p.name AS project_name, p.icon, p.color, p.kind, p.archived
+               FROM steps s JOIN projects p ON p.id = s.project_id
+               WHERE s.done = 1 AND s.done_at IS NOT NULL
+               ORDER BY s.done_at DESC, s.id DESC
+               LIMIT ?`, [limit]);
+}
+
 // Reorder the open steps. ids is the full open list in the wanted order; any
 // open step not mentioned keeps its place after the mentioned ones.
 function reorderSteps(projectId, ids) {
@@ -522,6 +536,6 @@ module.exports = {
   getSetting, setSetting, workspaceRoot, markersVersion, allMarkers,
   listProjects, getProject, createProject, updateProject, deleteProject,
   addMarker, addLog, setActivity, slugify,
-  addStep, updateStep, deleteStep, reorderSteps, syncNextStep,
+  addStep, updateStep, deleteStep, reorderSteps, syncNextStep, listDone,
   getCache, putCache, allCache,
 };
