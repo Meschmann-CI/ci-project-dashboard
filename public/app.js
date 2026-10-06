@@ -205,7 +205,7 @@ function render() {
   renderTiles(visible);
   renderQueue(visible);
   renderBoard(visible);
-  const n = state.queue.length;
+  const n = new Set(state.queue.map((q) => q.project_id)).size;
   const qc = $('#queueCount'); qc.textContent = n; qc.className = 'count' + (n ? '' : ' zero');
   renderDone();
   $('#doneCount').textContent = doneStats(state.done).thisWeek;
@@ -561,20 +561,146 @@ function renderQueue(visible) {
   const byId = new Map(state.projects.map((p) => [p.id, p]));
   const items = state.queue.filter((q) => ids.has(q.project_id));
   const box = $('#queue'); box.innerHTML = '';
+
   if (!items.length) {
-    const e = el('div', 'empty', 'Nothing needs you.');
-    e.appendChild(el('small', null, 'Every active project has a next step and recent activity. Go make something.'));
-    box.appendChild(e); return;
+    const clear = el('div', 'allclear');
+    const mark = el('span', 'ac-mark'); mark.innerHTML = glyphSvg('check');
+    clear.appendChild(mark);
+    const words = el('div');
+    words.appendChild(el('div', 'ac-title', state.queue.length ? 'Nothing here matches the filter.' : 'All clear.'));
+    words.appendChild(el('div', 'ac-sub', state.queue.length
+      ? 'Clear the kind filter or search to see everything that needs you.'
+      : 'Every active project has a next step and recent activity, nothing is unpushed, and nobody is overdue. Go make something.'));
+    clear.appendChild(words);
+    box.appendChild(clear);
+    return;
   }
-  items.forEach((it, i) => {
-    const p = byId.get(it.project_id) || {};
-    const r = el('div', `qrow ${it.severity}`); r.dataset.color = p.color || 'cocoa'; r.style.setProperty('--i', i);
-    r.appendChild(appIcon(p, 'md'));
-    const body = el('div'); body.appendChild(el('div', 'label', it.label)); body.appendChild(el('div', 'sub', it.detail)); r.appendChild(body);
-    r.appendChild(el('div', 'who', it.project_name));
-    r.addEventListener('click', () => openDrawer(it.project_id));
-    box.appendChild(r);
+
+  // One card per project, in the queue's own order: the first time a project
+  // appears is its most urgent reason, so data-loss warnings still lead.
+  const groups = new Map();
+  for (const it of items) {
+    if (!groups.has(it.project_id)) groups.set(it.project_id, []);
+    groups.get(it.project_id).push(it);
+  }
+  let i = 0;
+  for (const [pid, list] of groups) {
+    const p = byId.get(pid);
+    if (p) box.appendChild(needCard(p, list, i++));
+  }
+}
+
+const isoDay = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+const daysFromNow = (n) => isoDay(new Date(Date.now() + n * DAY));
+
+async function copyText(text, done) {
+  try { await navigator.clipboard.writeText(text); toast(done); }
+  catch { toast('Could not copy. Your browser blocked the clipboard.', true); }
+}
+
+// What you can do about a project, worked out from why it is here. The first
+// action is the one most likely to clear it; Open is always last.
+function needActions(p, list) {
+  const has = (id) => list.some((f) => f.id === id);
+  const acts = [];
+  const add = (label, run, title) => { if (!acts.some((a) => a.label === label)) acts.push({ label, run, title }); };
+  const active = ['building', 'testing', 'handoff'].includes(p.stage);
+
+  if (has('no-next-step')) add('Add a step', 'add-step');
+  if (has('waiting-overdue')) {
+    add('Copy a nudge', () => copyText(
+      `Hi ${p.waiting_on}, checking in on ${p.name}. Anything I can do to help it move?`,
+      'Nudge copied. Paste it into Teams or email.'), 'Copies a short check-in message');
+    add('Still waiting', () => patch(p.id, { waiting_since: isoDay(new Date()) }), 'Restarts the 7-day clock');
+    add('Stop waiting', () => patch(p.id, { waiting_on: '' }));
+  }
+  if (has('stale') || has('review-due') || has('no-next-step')) {
+    add('Snooze 2 weeks', () => patch(p.id, { review_after: daysFromNow(14) }), `Quiet until ${fmtDay(new Date(Date.now() + 14 * DAY))}`);
+    if (active) add('Pause it', () => patch(p.id, { stage: 'paused' }));
+  }
+  if (has('unpushed')) add('Copy a push request', () => copyText(
+    `Push the unpushed commits in ${p.path || p.name}.`, 'Copied. Paste it into a Claude session.'), 'For pasting into Claude');
+  if (has('dirty')) add('Copy a commit request', () => copyText(
+    `Review and commit the uncommitted changes in ${p.path || p.name}.`, 'Copied. Paste it into a Claude session.'), 'For pasting into Claude');
+  return acts.slice(0, 3);
+}
+
+function needCard(p, list, i) {
+  const c = el('article', 'need-card');
+  c.dataset.color = p.color || 'cocoa';
+  c.style.setProperty('--i', i);
+
+  const head = el('button', 'nc-head');
+  head.type = 'button';
+  head.appendChild(appIcon(p, 'sm'));
+  head.appendChild(el('span', 'nc-name', p.name));
+  head.appendChild(stageLabel(p));
+  head.addEventListener('click', () => openDrawer(p.id));
+  c.appendChild(head);
+
+  const ul = el('ul', 'nc-reasons');
+  for (const f of list) {
+    const li = el('li', `sev-${f.severity}`);
+    li.appendChild(el('i', 'nc-dot'));
+    const words = el('span', 'nc-words');
+    words.appendChild(el('span', 'nc-label', f.label));
+    if (f.detail) words.appendChild(el('span', 'nc-detail', f.detail));
+    li.appendChild(words);
+    const mute = el('button', 'nc-mute', 'Mute');
+    mute.type = 'button';
+    mute.title = 'Stop flagging this for this project. Turn it back on under Nags in the project.';
+    mute.addEventListener('click', () => {
+      const set = new Set(p.muted_rules || []); set.add(f.id);
+      patch(p.id, { muted_rules: [...set] });
+    });
+    li.appendChild(mute);
+    ul.appendChild(li);
+  }
+  c.appendChild(ul);
+
+  const row = el('div', 'nc-actions');
+  const acts = needActions(p, list);
+  acts.forEach((a, k) => {
+    const b = el('button', 'nc-btn' + (k === 0 ? ' primary' : ''), a.label);
+    b.type = 'button';
+    if (a.title) b.title = a.title;
+    b.addEventListener('click', () => {
+      if (a.run === 'add-step') return addStepInline(p, c, row);
+      a.run();
+    });
+    row.appendChild(b);
   });
+  const open = el('button', 'nc-btn ghost', 'Open');
+  open.type = 'button';
+  open.addEventListener('click', () => openDrawer(p.id));
+  row.appendChild(open);
+  c.appendChild(row);
+  return c;
+}
+
+// "Add a step" turns the button row into an input, right on the card.
+function addStepInline(p, card, row) {
+  const wrap = el('div', 'nc-add');
+  const inp = document.createElement('input');
+  inp.type = 'text';
+  inp.placeholder = `Next step for ${p.name}, press Enter`;
+  inp.setAttribute('aria-label', `Next step for ${p.name}`);
+  const cancel = el('button', 'nc-btn ghost', 'Cancel');
+  cancel.type = 'button';
+  cancel.addEventListener('click', () => wrap.replaceWith(row));
+  inp.addEventListener('keydown', async (e) => {
+    if (e.key === 'Escape') { wrap.replaceWith(row); return; }
+    if (e.key !== 'Enter' || !inp.value.trim()) return;
+    e.preventDefault();
+    const text = inp.value.trim();
+    inp.disabled = true;
+    await steps(p.id, 'POST', '', { text });
+    toast(`Added to ${p.name}`);
+  });
+  wrap.appendChild(inp);
+  wrap.appendChild(cancel);
+  row.replaceWith(wrap);
+  inp.focus();
 }
 
 function renderBoard(visible) {

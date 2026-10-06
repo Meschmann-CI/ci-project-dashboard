@@ -115,6 +115,8 @@ The top of the page is a queue, not a board. A project appears when a rule fires
 | `no-remote` | info | an app with no git remote, so no backup off this machine |
 | `untracked` | info | untracked files in a repo |
 
+The Needs you tab shows one card per project with every reason it is there, most urgent project first. Each card offers the actions that clear it: Add a step (typed right on the card), Snooze 2 weeks, Pause it, Copy a nudge / Still waiting / Stop waiting for overdue waits, and Copy a push or commit request (text to paste into a Claude session) for git warnings. Hover a reason to Mute that rule for the project. When nothing is left, the tab says All clear. The tab's count is projects, matching "N need you" under the greeting.
+
 Warnings sort above chores because uncommitted work is a data-loss risk. `paused` and `done` silence the `act` rules but not the warnings.
 
 **Snooze** (`review_after`) silences `stale`, `no-next-step` and `no-remote` until a date. Use it for deliberately parked work: Lab Broadcast is snoozed to 2026-10-08 pending the Zoom Webinar decision.

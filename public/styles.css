@@ -975,3 +975,61 @@ main { max-width: 1500px; margin: 0 auto; padding: 0 36px 80px; }
 .tile-fresh { font-size: 12px; font-weight: 600; color: var(--muted); white-space: nowrap; }
 .dk { grid-template-columns: 34px minmax(0, 1fr) 120px; }
 .dk .spark { gap: 1px; }
+
+/* ---------- design batch 3: Needs you, one card per project ---------- */
+.need-card {
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow);
+  display: grid; gap: 12px; padding: 14px 16px 16px;
+  animation: rise .4s both; animation-delay: calc(var(--i, 0) * 35ms);
+}
+.nc-head {
+  display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 12px; align-items: center;
+  border: 0; background: transparent; padding: 0; font: inherit; color: inherit; text-align: left; cursor: pointer;
+}
+.nc-head:hover .nc-name { text-decoration: underline; text-underline-offset: 3px; }
+.nc-head:hover .ico { transform: rotate(-4deg) scale(1.06); }
+.nc-name { font-family: var(--display); font-weight: 700; font-size: 17px; letter-spacing: -.015em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nc-head .stg { padding-top: 0; }
+.nc-reasons { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.nc-reasons li { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 6px 8px; border-radius: 10px; }
+.nc-reasons li:hover { background: var(--paper-2); }
+.nc-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+.sev-warn .nc-dot { background: var(--ink); }
+.sev-info .nc-dot { background: var(--faint); }
+.nc-words { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; min-width: 0; }
+.nc-label { font-weight: 700; font-size: 14.5px; }
+.nc-detail { font-size: 12.5px; color: var(--muted); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nc-mute {
+  border: 0; background: transparent; font: inherit; font-size: 12px; font-weight: 700; color: var(--faint);
+  padding: 2px 6px; border-radius: 6px; cursor: pointer; opacity: 0; transition: opacity .12s;
+}
+.nc-reasons li:hover .nc-mute, .nc-mute:focus-visible { opacity: 1; }
+.nc-mute:hover { color: var(--ink); background: var(--card); }
+.nc-actions, .nc-add { display: flex; gap: 8px; flex-wrap: wrap; padding-top: 12px; border-top: 1px solid var(--line); }
+.nc-btn {
+  border: 1.5px solid var(--line-2); background: var(--card); color: var(--ink-2); border-radius: 999px;
+  padding: 7px 14px; font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; transition: border-color .12s, color .12s, transform .12s;
+}
+.nc-btn:hover { border-color: var(--ink); color: var(--ink); transform: translateY(-1px); }
+.nc-btn.primary { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+.nc-btn.ghost { border-color: transparent; color: var(--muted); }
+.nc-btn.ghost:hover { color: var(--ink); border-color: var(--line-2); }
+.nc-add input {
+  flex: 1; min-width: 0; padding: 8px 14px; border-radius: 999px; border: 1.5px solid var(--ink);
+  background: var(--paper); color: var(--ink); font: inherit; font-size: 14px; outline: none;
+}
+
+/* When nothing needs you, say so with some pride. */
+.allclear {
+  grid-column: 1 / -1; display: flex; align-items: center; gap: 18px; padding: 26px 28px;
+  border-radius: 22px; border: 1px solid color-mix(in oklab, var(--ok) 35%, var(--line));
+  background: color-mix(in oklab, var(--ok) 7%, var(--card)); animation: rise .45s both;
+}
+.ac-mark { width: 52px; height: 52px; border-radius: 50%; background: var(--ok); color: #fff; display: grid; place-items: center; flex: none; box-shadow: 0 8px 20px -10px var(--ok); }
+.ac-mark svg { width: 26px; height: 26px; stroke-width: 3; }
+.ac-title { font-family: var(--display); font-size: 24px; font-weight: 700; letter-spacing: -.02em; color: var(--ok); }
+.ac-sub { font-size: 14px; color: var(--ink-2); margin-top: 2px; }
+/* Cards in a row share a height, with the buttons on the bottom edge. */
+#queue { align-items: stretch; gap: 14px; }
+.need-card { grid-template-rows: auto 1fr auto; }
+.nc-reasons { align-content: start; }
