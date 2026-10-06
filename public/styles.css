@@ -1118,3 +1118,77 @@ main { max-width: 1500px; margin: 0 auto; padding: 0 36px 80px; }
 }
 .icon-pop input.emoji-input:focus { outline: none; border-color: var(--ink); }
 .dhead .ico.pick:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+
+/* ---------- design batch 5: Wins and moments ---------- */
+#done { display: block; }
+.wins { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 18px; margin-bottom: 28px; }
+.wcard { background: var(--card); border: 1px solid var(--line); border-radius: 22px; padding: 24px; box-shadow: var(--shadow); display: grid; gap: 18px; align-content: start; animation: rise .4s both; }
+.wbig { display: flex; align-items: flex-end; gap: 14px; }
+.wbig .wn { font-family: var(--display); font-size: 92px; font-weight: 700; letter-spacing: -.055em; line-height: .85; }
+.wbig .wl { font-size: 15px; font-weight: 600; color: var(--muted); line-height: 1.35; white-space: pre-line; padding-bottom: 6px; }
+.wstats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.wstats div { border-top: 1px solid var(--line); padding-top: 10px; display: grid; gap: 2px; }
+.wstats b { font-family: var(--display); font-size: 21px; font-weight: 700; letter-spacing: -.02em; }
+.wstats span { font-size: 12px; font-weight: 600; color: var(--muted); }
+.wh { font-size: 11.5px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: -6px; }
+.pbars { display: grid; gap: 4px; }
+.pb {
+  display: grid; grid-template-columns: 26px minmax(0, 170px) minmax(0, 1fr) 28px; gap: 12px; align-items: center;
+  border: 0; background: transparent; padding: 4px 6px; margin: 0 -6px; border-radius: 10px; font: inherit; color: var(--ink); text-align: left; cursor: pointer;
+}
+.pb:hover { background: var(--paper-2); }
+.pb.more { cursor: default; color: var(--muted); }
+.pb.more:hover { background: transparent; }
+.pb-name { font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pb-bar { height: 8px; border-radius: 99px; background: var(--paper-2); overflow: hidden; }
+.pb-bar i { display: block; height: 100%; border-radius: 99px; background: var(--c, var(--ink)); transform-origin: left; animation: grow .7s cubic-bezier(.2,.8,.2,1) both; }
+@keyframes grow { from { transform: scaleX(0); } to { transform: none; } }
+.pb em { font-style: normal; font-size: 13px; font-weight: 700; color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Ring calendar: one ring per day, closing at three steps. */
+.calhead { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: -6px; }
+.calhead b { font-family: var(--display); font-size: 17px; font-weight: 700; }
+.calhead span { font-size: 12px; font-weight: 600; color: var(--muted); }
+.cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+.cal-h { font-size: 10.5px; font-weight: 800; letter-spacing: .06em; color: var(--faint); text-align: center; }
+.cal-d { position: relative; aspect-ratio: 1; display: grid; place-items: center; max-width: 54px; justify-self: center; width: 100%; }
+.cal-d.blank { visibility: hidden; }
+.cal-d svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.cal-d circle { fill: none; stroke-width: 3.2; }
+.cal-d .track { stroke: var(--line); }
+.cal-d .fill { stroke: color-mix(in oklab, var(--ok) 70%, var(--card)); stroke-linecap: round; }
+.cal-d .fill.closed { stroke: var(--ok); }
+.cal-n { font-size: 11.5px; font-weight: 700; color: var(--faint); position: relative; }
+.cal-d.has .cal-n { color: var(--ink); }
+.cal-d.today .cal-n { color: var(--accent-text); }
+.cal-d.today .track { stroke: color-mix(in oklab, var(--accent) 45%, transparent); }
+.cal-d.future { opacity: .35; }
+@media (max-width: 960px) { .wins { grid-template-columns: 1fr; } .wstats { grid-template-columns: repeat(2, 1fr); } }
+
+/* Moments */
+.plus1 {
+  position: fixed; z-index: 120; pointer-events: none; font-family: var(--display); font-weight: 800; font-size: 16px; color: var(--ok);
+  transition: transform .75s cubic-bezier(.3,.7,.2,1), opacity .75s ease-in;
+}
+.burst { position: fixed; z-index: 120; width: 7px; height: 7px; border-radius: 2px; pointer-events: none; }
+.count { transition: transform .3s cubic-bezier(.2,.9,.3,1.6); }
+.count.bump { transform: scale(1.4); }
+.tile.glow, .dk.glow { animation: glow 1.8s ease-out; }
+@keyframes glow {
+  0% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--c, var(--ink)) 55%, transparent), var(--shadow); }
+  35% { box-shadow: 0 0 0 6px color-mix(in oklab, var(--c, var(--ink)) 28%, transparent), var(--shadow); }
+  100% { box-shadow: 0 0 0 12px transparent, var(--shadow); }
+}
+.recap {
+  display: inline-flex; align-items: center; gap: 10px; margin: 10px 0 0; padding: 6px 8px 6px 14px; border-radius: 999px;
+  background: color-mix(in oklab, var(--ok) 9%, var(--card)); border: 1px solid color-mix(in oklab, var(--ok) 30%, transparent);
+  font-size: 13.5px; font-weight: 600; color: var(--ink); animation: rise .5s .2s both;
+}
+.recap-x { border: 0; background: transparent; font-size: 16px; line-height: 1; color: var(--muted); cursor: pointer; padding: 2px 6px; border-radius: 50%; }
+.recap-x:hover { color: var(--ink); background: var(--paper-2); }
+/* After 10pm the scan orb dims to a moon grey. */
+body.night .pill-status:not(.running):not(.error) .radar {
+  background: radial-gradient(circle, var(--faint) 0 2.5px, transparent 3px);
+  box-shadow: inset 0 0 0 1.5px color-mix(in oklab, var(--faint) 55%, transparent);
+}
+@media (prefers-reduced-motion: reduce) { .tile.glow, .dk.glow, .pb-bar i { animation: none; } }

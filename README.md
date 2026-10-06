@@ -80,11 +80,22 @@ Under the hood, steps live in their own table and `projects.next_step` is a cach
 
 Three other views sit behind the toggle. **Needs you** is the full attention queue as a list. **Board** is a kanban by stage with drag-and-drop. **Done** is the running record of everything you have ticked off, across every project, so progress is visible rather than just the backlog. The view you leave it on is remembered.
 
-## The Done view
+## Wins
 
-Four numbers at the top: today, this week (Monday start), the last 30 days, and the current streak of days with at least one tick. A blank today does not break the streak, since today is still in progress. Under that, a 14-day strip shaded by how many steps landed each day, then the list itself grouped by week and by day, newest first. Each row shows the step, the project it belonged to, and the time. Click a row to open that project.
+The tab once called Done. On top, the number of steps finished in the last 30 days, then best day, projects moved, the current streak (or the longest in the window when there is no current one) and this week. "Where it went" ranks projects by steps finished in those 30 days. Beside it, a ring calendar for last month and this one: one ring per day, closing at three steps. A blank today does not break a streak, since today is still in progress. Under all that, the list itself grouped by week and by day, newest first. Each row shows the step, the project it belonged to, and the time. Click a row to open that project.
 
-The search box and kind chips apply here too, so "what did I finish on Sitecap" is one keystroke. The count on the Done tab and the "N done this week" in the header both count the current week. Days are grouped in your local time zone, so an 11pm tick counts for today. Completed steps on archived projects still appear, because finished work is finished work. Reopening a step removes it from the log.
+The search box and kind chips apply here too, so "what did I finish on Sitecap" is one keystroke. The count on the Wins tab and the "N done this week" in the header both count the current week. Days are grouped in your local time zone, so an 11pm tick counts for today. Completed steps on archived projects still appear, because finished work is finished work. Reopening a step removes it from the log.
+
+### Moments
+
+Small, rare and earned; each fires on something you did, and the moving parts switch off when the system asks for reduced motion.
+
+- Ticking a step floats a +1 to the Wins count, which bumps. Ticking a project's last open step adds a short burst in the project's colour and a "checklist clear" note.
+- First tick of the day on a 3, 5, 7, 10, 14, 21, 30, 50 or 100 day streak shows a toast, once that day.
+- After a scan, any tile whose activity moved glows once.
+- An empty Needs you shows a check in its tab and an All clear card.
+- The first visit of a new week shows last week in one line under the greeting ("Last week: 11 done across 6 projects. Best day Wednesday."), once; dismiss it with the ×.
+- After 10pm the scan radar dims to grey, alongside the "Still up" greeting.
 
 The look is deliberately not on-brand. This is a personal tool, so it borrows Apple's rather than CI's: white shading to Apple's off-white grey down the page, SF Pro where it exists and Inter as the Windows stand-in, and the ten project hues taken from Apple's system colours. Each project wears an app-style icon: a white line glyph on a squircle in its colour, picked by clicking the big icon at the top of a project (an emoji still works as an override). The icon is the only place a project's colour appears; cards, pills, bars and chips stay neutral, so orange keeps its meaning. It follows your system light or dark setting, and dark mode is a true near-black.
 

@@ -190,7 +190,10 @@ async function pollScan() {
   renderScan();
   if (state.scan.running) state.pollTimer = setTimeout(pollScan, 700);
   else {
-    clearTimeout(state.pollTimer); state.pollTimer = null; await load();
+    clearTimeout(state.pollTimer); state.pollTimer = null;
+    const before = new Map(state.projects.map((p) => [p.id, newestOf(p)]));
+    await load();
+    glowChanged(before);
     const n = state.scan.summary?.suggested || 0;
     if (n) toast(`Scan found ${n} new suggested update${n === 1 ? '' : 's'}`);
   }
@@ -206,7 +209,7 @@ function render() {
   renderQueue(visible);
   renderBoard(visible);
   const n = new Set(state.queue.map((q) => q.project_id)).size;
-  const qc = $('#queueCount'); qc.textContent = n; qc.className = 'count' + (n ? '' : ' zero');
+  const qc = $('#queueCount'); qc.textContent = n || '✓'; qc.className = 'count' + (n ? '' : ' zero');
   renderDone();
   $('#doneCount').textContent = doneStats(state.done).thisWeek;
   renderSuggested();
@@ -224,6 +227,18 @@ function renderHero() {
   // Built as nodes rather than innerHTML: the name is data, not markup.
   g.textContent = name ? `${word}, ${name}` : word;
   g.appendChild(el('span', 'period', '.'));
+  document.body.classList.toggle('night', h >= 22 || h < 5);
+
+  if (state.recap === undefined && state.done.length) state.recap = weeklyRecap();
+  let recap = $('#recap');
+  if (state.recap && !recap) {
+    recap = el('p', 'recap'); recap.id = 'recap';
+    recap.appendChild(el('span', null, state.recap));
+    const x = el('button', 'recap-x', '×'); x.type = 'button'; x.setAttribute('aria-label', 'Dismiss');
+    x.addEventListener('click', () => { state.recap = null; recap.remove(); });
+    recap.appendChild(x);
+    $('#summary').after(recap);
+  }
 
   const active = state.projects.filter((p) => !p.archived);
   const need = new Set(state.queue.map((q) => q.project_id)).size;
@@ -442,6 +457,7 @@ function nextLine(p) {
 
 function tile(p, i) {
   const t = el('article', 'tile');
+  t.dataset.pid = p.id;
   t.dataset.color = p.color || 'cocoa';
   t.style.setProperty('--i', i);
   t.addEventListener('click', () => openDrawer(p.id));
@@ -477,6 +493,7 @@ function dock(list) {
   const d = el('div', 'dock');
   list.forEach((p, k) => {
     const r = el('button', 'dk' + (['paused', 'done'].includes(p.stage) ? ' is-quiet' : ''));
+    r.dataset.pid = p.id;
     r.type = 'button';
     r.dataset.color = p.color || 'cocoa';
     r.style.setProperty('--i', k);
@@ -539,6 +556,7 @@ function upRow(p, k) {
     e.stopPropagation();
     if (!step || r.classList.contains('ticking')) return;
     r.classList.add('ticking');
+    celebrateTick(tick, p);
     // Let the check land before the list redraws with the project's next step.
     setTimeout(() => steps(p.id, 'PATCH', `/${step.id}`, { done: true }), 480);
   });
@@ -1167,6 +1185,7 @@ function stepItem(p, s, isNext) {
     e.stopPropagation();
     if (r.classList.contains('ticking')) return;
     r.classList.add('ticking');
+    celebrateTick(tick, p);
     // Let the check animation land before the row leaves the list.
     setTimeout(() => steps(p.id, 'PATCH', `/${s.id}`, { done: true }), 420);
   });
@@ -1278,8 +1297,6 @@ function doneStats(items) {
   const now = new Date(); const today = startOfDay(now); const week = startOfWeek(now);
   const byDay = new Map();
   for (const r of items) { const k = dayKey(r.done_at); byDay.set(k, (byDay.get(k) || 0) + 1); }
-  const strip = [];
-  for (let i = 13; i >= 0; i -= 1) { const d = new Date(today.getTime() - i * DAY); strip.push({ date: d, n: byDay.get(dayKey(d)) || 0 }); }
   // Consecutive days with at least one tick, counting back from today. A blank
   // today does not end the run, since today is still in progress.
   let streak = 0;
@@ -1288,33 +1305,116 @@ function doneStats(items) {
     if (n) streak += 1; else if (i > 0) break;
   }
   const since = (d) => items.filter((r) => new Date(r.done_at) >= d).length;
-  return { today: byDay.get(dayKey(today)) || 0, thisWeek: since(week), last30: since(new Date(today.getTime() - 29 * DAY)), total: items.length, streak, strip, byDay };
+  return { today: byDay.get(dayKey(today)) || 0, thisWeek: since(week), last30: since(new Date(today.getTime() - 29 * DAY)), total: items.length, streak, byDay };
+}
+
+// What the last 30 days add up to, for the top of Wins.
+function winsSummary(items) {
+  const today = startOfDay(new Date());
+  const from = new Date(today.getTime() - 29 * DAY);
+  const recent = items.filter((r) => new Date(r.done_at) >= from);
+  const byDay = new Map();
+  const byProject = new Map();
+  for (const r of recent) {
+    const k = dayKey(r.done_at);
+    byDay.set(k, (byDay.get(k) || 0) + 1);
+    const g = byProject.get(r.project_id) || { r, n: 0 };
+    g.n += 1; byProject.set(r.project_id, g);
+  }
+  let best = null;
+  for (const [k, n] of byDay) if (!best || n > best.n) best = { k, n };
+  let longest = 0; let run = 0;
+  for (let i = 29; i >= 0; i -= 1) {
+    if (byDay.get(dayKey(new Date(today.getTime() - i * DAY)))) { run += 1; longest = Math.max(longest, run); } else run = 0;
+  }
+  const projects = [...byProject.values()].sort((a, b) => b.n - a.n || a.r.project_name.localeCompare(b.r.project_name));
+  return { count: recent.length, best, longest, projects };
+}
+
+const RING_GOAL = 3;   // a day's ring closes at three steps
+function ringCalendar(year, month, byDay, uptoToday) {
+  const wrap = el('div', 'cal');
+  for (const d of ['M', 'T', 'W', 'T', 'F', 'S', 'S']) wrap.appendChild(el('span', 'cal-h', d));
+  const first = new Date(year, month, 1);
+  const lead = (first.getDay() + 6) % 7;
+  for (let i = 0; i < lead; i += 1) wrap.appendChild(el('span', 'cal-d blank'));
+  const days = new Date(year, month + 1, 0).getDate();
+  const todayKey = dayKey(new Date());
+  const r = 15.5, C = 2 * Math.PI * r;
+  for (let d = 1; d <= days; d += 1) {
+    const date = new Date(year, month, d);
+    const k = dayKey(date);
+    const n = byDay.get(k) || 0;
+    const future = uptoToday && date > new Date();
+    const cell = el('span', 'cal-d' + (n ? ' has' : '') + (k === todayKey ? ' today' : '') + (future ? ' future' : ''));
+    cell.title = `${fmtDay(date)}: ${n} done`;
+    const f = Math.min(1, n / RING_GOAL);
+    cell.innerHTML = `<svg viewBox="0 0 36 36" aria-hidden="true"><circle cx="18" cy="18" r="${r}" class="track"/>`
+      + (n ? `<circle cx="18" cy="18" r="${r}" class="fill${f >= 1 ? ' closed' : ''}" stroke-dasharray="${(C * f).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 18 18)"/>` : '')
+      + '</svg>';
+    cell.appendChild(el('span', 'cal-n', String(d)));
+    wrap.appendChild(cell);
+  }
+  return wrap;
 }
 
 function renderDone() {
   const box = $('#done'); box.innerHTML = '';
   const items = doneVisible();
   const s = doneStats(items);
+  const w = winsSummary(items);
 
-  const side = el('aside', 'done-side');
-  const stats = el('div', 'done-stats');
-  for (const [n, lbl] of [[s.today, 'today'], [s.thisWeek, 'this week'], [s.last30, 'last 30 days'], [s.streak, s.streak === 1 ? 'day streak' : 'day streak']]) {
-    const t = el('div', 'stat'); t.appendChild(el('div', 'n', String(n))); t.appendChild(el('div', 'l', lbl)); stats.appendChild(t);
-  }
-  side.appendChild(stats);
+  // ---- the headline card and the ring calendar
+  const top = el('div', 'wins');
+  const card = el('div', 'wcard');
+  const big = el('div', 'wbig');
+  big.appendChild(el('span', 'wn', String(w.count)));
+  big.appendChild(el('span', 'wl', `step${w.count === 1 ? '' : 's'} finished\nin the last 30 days`));
+  card.appendChild(big);
+  const stats = el('div', 'wstats');
+  const stat = (v, l) => { const d = el('div'); d.appendChild(el('b', null, v)); d.appendChild(el('span', null, l)); stats.appendChild(d); };
+  stat(w.best ? new Date(`${w.best.k}T12:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '—', w.best ? `best day, ${w.best.n} done` : 'best day');
+  stat(String(w.projects.length), w.projects.length === 1 ? 'project moved' : 'projects moved');
+  stat(s.streak ? `${s.streak} day${s.streak === 1 ? '' : 's'}` : `${w.longest} day${w.longest === 1 ? '' : 's'}`, s.streak ? 'current streak' : 'longest streak');
+  stat(String(s.thisWeek), 'this week');
+  card.appendChild(stats);
 
-  const max = Math.max(1, ...s.strip.map((d) => d.n));
-  const strip = el('div', 'strip');
-  for (const d of s.strip) {
-    const cell = el('div', 'cell' + (d.n ? ' has' : ''));
-    cell.style.setProperty('--f', (d.n / max).toFixed(2));
-    cell.title = `${fmtDay(d.date)}: ${d.n} done`;
-    cell.appendChild(el('span', 'wd', d.date.toLocaleDateString(undefined, { weekday: 'narrow' })));
-    if (d.n) cell.appendChild(el('span', 'nn', String(d.n)));
-    strip.appendChild(cell);
+  if (w.projects.length) {
+    card.appendChild(el('div', 'wh', 'Where it went'));
+    const bars = el('div', 'pbars');
+    const max = w.projects[0].n;
+    for (const { r, n } of w.projects.slice(0, 7)) {
+      const row = el('button', 'pb'); row.type = 'button'; row.dataset.color = r.color || 'cocoa';
+      row.appendChild(appIcon(r, 'xs'));
+      row.appendChild(el('span', 'pb-name', r.project_name));
+      const bar = el('span', 'pb-bar'); const fill = el('i'); fill.style.width = `${(n / max) * 100}%`; bar.appendChild(fill); row.appendChild(bar);
+      row.appendChild(el('em', null, String(n)));
+      row.addEventListener('click', () => openDrawer(r.project_id));
+      bars.appendChild(row);
+    }
+    const rest = w.projects.slice(7);
+    if (rest.length) {
+      const more = el('div', 'pb more');
+      more.appendChild(el('span'));
+      more.appendChild(el('span', 'pb-name', `${rest.length} more project${rest.length === 1 ? '' : 's'}`));
+      more.appendChild(el('span'));
+      more.appendChild(el('em', null, String(rest.reduce((a, g) => a + g.n, 0))));
+      bars.appendChild(more);
+    }
+    card.appendChild(bars);
   }
-  side.appendChild(strip);
-  box.appendChild(side);
+  top.appendChild(card);
+
+  const calCard = el('div', 'wcard');
+  const now = new Date();
+  const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const calHead = (d, note) => { const h = el('div', 'calhead'); h.appendChild(el('b', null, d.toLocaleDateString(undefined, { month: 'long' }))); h.appendChild(el('span', null, note)); return h; };
+  calCard.appendChild(calHead(prev, `a ring closes at ${RING_GOAL} steps`));
+  calCard.appendChild(ringCalendar(prev.getFullYear(), prev.getMonth(), s.byDay, false));
+  calCard.appendChild(calHead(now, 'so far'));
+  calCard.appendChild(ringCalendar(now.getFullYear(), now.getMonth(), s.byDay, true));
+  top.appendChild(calCard);
+  box.appendChild(top);
 
   if (!items.length) {
     const e = el('div', 'empty', 'Nothing ticked off yet.');
@@ -1322,6 +1422,7 @@ function renderDone() {
     box.appendChild(e); return;
   }
 
+  // ---- every win, by week and day
   const list = el('div', 'donelog');
   const todayKey = dayKey(new Date()); const yKey = dayKey(new Date(Date.now() - DAY));
   let lastDay = null; let lastWeek = null;
@@ -1351,6 +1452,88 @@ function renderDone() {
     list.appendChild(row);
   }
   box.appendChild(list);
+}
+
+// ------------------------------------------------------------------ moments
+//
+// Small, rare and earned. Each fires on something Matt did, never on a timer,
+// and the moving parts switch off under prefers-reduced-motion.
+
+const reduceMotion = () => window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+const STREAK_MILESTONES = [3, 5, 7, 10, 14, 21, 30, 50, 100];
+
+// A tick sends a +1 to the Wins count. Finishing a project's last open step
+// adds a short burst in the project's colour.
+function celebrateTick(fromEl, p) {
+  const lastStep = openSteps(p) <= 1;
+  const target = $('#doneCount');
+  if (!reduceMotion() && fromEl && target) {
+    const a = fromEl.getBoundingClientRect(); const b = target.getBoundingClientRect();
+    const plus = el('span', 'plus1', '+1');
+    plus.style.left = `${a.left + a.width / 2 - 10}px`; plus.style.top = `${a.top - 4}px`;
+    document.body.appendChild(plus);
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      plus.style.transform = `translate(${b.left + b.width / 2 - (a.left + a.width / 2)}px, ${b.top - a.top}px) scale(.7)`;
+      plus.style.opacity = '0';
+    }));
+    setTimeout(() => plus.remove(), 1000);
+    if (lastStep) burst(a.left + a.width / 2, a.top + a.height / 2, `var(--${p.color || 'cocoa'})`);
+  }
+  setTimeout(() => { if (!target) return; target.classList.add('bump'); setTimeout(() => target.classList.remove('bump'), 420); }, reduceMotion() ? 0 : 700);
+  if (lastStep) setTimeout(() => toast(`${p.name}: checklist clear`), 800);
+  // Streak milestones, once per day, only on the day's first tick.
+  setTimeout(() => {
+    const s = doneStats(state.done);
+    if (s.today !== 1 || !STREAK_MILESTONES.includes(s.streak)) return;
+    const key = dayKey(new Date());
+    try { if (localStorage.getItem('mc.streak') === key) return; localStorage.setItem('mc.streak', key); } catch { /* fine */ }
+    toast(`${s.streak}-day streak. Keep it going.`);
+  }, 1800);
+}
+
+function burst(x, y, color) {
+  const cols = [color, 'var(--accent)', 'var(--ink)', color];
+  for (let i = 0; i < 20; i += 1) {
+    const b = el('span', 'burst');
+    b.style.left = `${x}px`; b.style.top = `${y}px`; b.style.background = cols[i % cols.length];
+    document.body.appendChild(b);
+    const ang = Math.random() * Math.PI * 2; const dist = 40 + Math.random() * 70;
+    b.animate([
+      { transform: 'translate(-50%, -50%) rotate(0)', opacity: 1 },
+      { transform: `translate(calc(-50% + ${Math.cos(ang) * dist}px), calc(-50% + ${Math.sin(ang) * dist + 30}px)) rotate(${Math.random() * 360}deg)`, opacity: 0 },
+    ], { duration: 900 + Math.random() * 300, easing: 'cubic-bezier(.2,.7,.3,1)', fill: 'forwards' });
+    setTimeout(() => b.remove(), 1300);
+  }
+}
+
+// After a scan, tiles whose activity moved glow once, so you see what changed
+// without reading dates.
+function glowChanged(before) {
+  if (!before || reduceMotion()) return;
+  for (const p of state.projects) {
+    const was = before.get(p.id); const now = newestOf(p);
+    if (!now || (was && Date.parse(now) <= Date.parse(was))) continue;
+    document.querySelectorAll(`[data-pid="${p.id}"]`).forEach((n) => {
+      n.classList.remove('glow'); void n.offsetWidth; n.classList.add('glow');
+    });
+  }
+}
+
+// The first visit of a new week shows last week in one line, once.
+function weeklyRecap() {
+  const wk = startOfWeek(new Date());
+  const key = dayKey(wk);
+  try { if (localStorage.getItem('mc.recap') === key) return null; } catch { return null; }
+  const prev = new Date(wk.getTime() - 7 * DAY);
+  const items = state.done.filter((r) => { const t = new Date(r.done_at); return t >= prev && t < wk; });
+  try { localStorage.setItem('mc.recap', key); } catch { /* fine */ }
+  if (!items.length) return null;
+  const projects = new Set(items.map((r) => r.project_id)).size;
+  const per = new Map();
+  for (const r of items) { const d = new Date(r.done_at).getDay(); per.set(d, (per.get(d) || 0) + 1); }
+  const bestDay = [...per.entries()].sort((a, b) => b[1] - a[1])[0][0];
+  const name = new Date(2026, 0, 4 + bestDay).toLocaleDateString(undefined, { weekday: 'long' });
+  return `Last week: ${items.length} done across ${projects} project${projects === 1 ? '' : 's'}. Best day ${name}.`;
 }
 
 // ------------------------------------------------------------------ suggested
