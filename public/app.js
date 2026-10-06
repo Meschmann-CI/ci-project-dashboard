@@ -756,40 +756,53 @@ async function refreshDetail() {
   try { const full = await api(`/api/projects/${state.openId}`); if (full.id === state.openId) { state.detail = full; renderDrawer(full); } }
   catch (e) { toast(e.message, true); }
 }
-function closeDrawer() { state.openId = null; state.detail = null; $('#scrim').hidden = true; $('#drawer').hidden = true; }
+function closeDrawer() { state.iconPop = null; state.openId = null; state.detail = null; $('#scrim').hidden = true; $('#drawer').hidden = true; }
 
 async function patch(id, body) {
   try { await api(`/api/projects/${id}`, { method: 'PATCH', body }); await load(); if (state.openId === id) await refreshDetail(); }
   catch (e) { toast(e.message, true); }
 }
 
+// The drawer reads first and edits second: what is next, where it stands and
+// what happened sit on top; every setting folds into four rows below.
 function renderDrawer(p) {
   const d = $('#drawer'); const scrollTop = d.scrollTop; d.innerHTML = '';
   d.dataset.color = p.color || 'cocoa';
 
   // ---- header
   const head = el('div', 'dhead');
-  const blob = appIcon(p, 'xl'); blob.classList.add('pick'); blob.title = 'Change icon';
-  blob.addEventListener('click', () => d.querySelector('#looks')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  const blob = appIcon(p, 'xl'); blob.classList.add('pick'); blob.title = 'Change icon and colour';
+  blob.setAttribute('role', 'button'); blob.tabIndex = 0;
+  const togglePop = (e) => { e.stopPropagation(); state.iconPop = state.iconPop === p.id ? null : p.id; renderDrawer(state.detail || p); };
+  blob.addEventListener('click', togglePop);
+  blob.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); togglePop(e); } });
   head.appendChild(blob);
   const titles = el('div', 'titles');
   const h2 = el('h2', null, p.name); h2.contentEditable = 'true'; h2.spellcheck = false; h2.title = 'Click to rename';
   h2.addEventListener('blur', () => { const v = h2.textContent.trim(); if (v && v !== p.name) patch(p.id, { name: v }); else h2.textContent = p.name; });
   h2.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); h2.blur(); } });
   titles.appendChild(h2);
-  const bits = [kindInfo(p.kind).label]; if (p.port) bits.push(`port ${p.port}`); if (p.newest?.at) bits.push(`last touched ${ago(p.newest.at)}`);
+  const bits = [kindInfo(p.kind).label];
+  if (p.priority === 1) bits.push('★ high priority');
+  if (p.port) bits.push(`port ${p.port}`);
+  if (p.newest?.at) bits.push(`last touched ${ago(p.newest.at)}`);
   titles.appendChild(el('div', 'sub', bits.join(' · ')));
   head.appendChild(titles);
   const close = el('button', 'close', '×'); close.setAttribute('aria-label', 'Close'); close.addEventListener('click', closeDrawer); head.appendChild(close);
+  if (state.iconPop === p.id) head.appendChild(iconPopover(p));
   d.appendChild(head);
 
   const body = el('div', 'dbody'); d.appendChild(body);
 
-  // ---- now
-  const openN = (p.steps || []).filter((s) => !s.done).length;
-  const gNow = group(body, 'Up next', openN ? `${openN} step${openN === 1 ? '' : 's'} queued · top one is the next step` : 'nothing queued');
-  gNow.appendChild(checklist(p));
+  // ---- where it stands
+  body.appendChild(stageTrack(p));
+  if (p.waiting_on) body.appendChild(waitingCallout(p));
 
+  // ---- what is next
+  const openN = openSteps(p);
+  const doneN = (p.steps || []).filter((s) => s.done).length;
+  const gNow = group(body, 'Up next', openN ? `${openN} queued · ${doneN} done` : doneN ? `nothing queued · ${doneN} done` : 'nothing queued', 'target');
+  gNow.appendChild(checklist(p));
   const mine = state.suggestions.filter((s) => s.project_id === p.id).length;
   if (mine) {
     const link = el('button', 'sug-link', `✨ ${mine} suggested update${mine === 1 ? '' : 's'} for this project · Review`);
@@ -797,22 +810,188 @@ function renderDrawer(p) {
     gNow.appendChild(link);
   }
 
-  const stageF = el('div', 'field'); stageF.appendChild(el('label', null, 'Stage'));
-  const steps = el('div', 'steps');
-  for (const s of state.meta.stages) {
-    const b = el('button', 'step' + (s === p.stage ? ' on' : ''), STAGE_LABEL[s] || s); b.dataset.stage = s;
-    b.addEventListener('click', () => { if (s !== p.stage) patch(p.id, { stage: s }); });
-    steps.appendChild(b);
-  }
-  stageF.appendChild(steps); gNow.appendChild(stageF);
+  // ---- what happened
+  const gTl = group(body, 'What happened', 'steps, notes, commits and Claude sessions', 'clock');
+  const note = input('', null); note.placeholder = 'Jot a note, press Enter'; note.className = 'tl-note';
+  note.addEventListener('keydown', async (e) => {
+    if (e.key !== 'Enter' || !note.value.trim()) return;
+    e.preventDefault();
+    try { await api(`/api/projects/${p.id}/log`, { method: 'POST', body: { text: note.value.trim() } }); note.value = ''; await refreshDetail(); }
+    catch (err) { toast(err.message, true); }
+  });
+  gTl.appendChild(note);
+  gTl.appendChild(timeline(p));
 
+  // ---- everything you change less often
+  const folds = el('div', 'folds');
+  folds.appendChild(fold(p, 'details', 'Details', detailsPreview(p), () => detailsBody(p)));
+  const firing = (p.flags || []).filter((f) => !f.suppressed).length;
+  folds.appendChild(fold(p, 'signals', 'Signals and nags', firing ? `${firing} nag${firing === 1 ? '' : 's'} firing` : 'nothing firing', () => signalsBody(p)));
+  folds.appendChild(fold(p, 'where', 'Where it lives', `${p.path || 'no folder'} · ${p.markers.length} marker${p.markers.length === 1 ? '' : 's'}`, () => whereBody(p)));
+  folds.appendChild(fold(p, 'notes', 'Notes', (p.notes || '').split('\n')[0] || 'none yet', () => { const w = el('div'); w.appendChild(textarea(p.notes, (v) => patch(p.id, { notes: v }))); return w; }));
+  body.appendChild(folds);
+
+  // ---- actions
+  const acts = el('div', 'dactions');
+  const arch = el('button', 'pill pill-ghost', p.archived ? 'Unarchive' : 'Archive'); arch.addEventListener('click', () => patch(p.id, { archived: p.archived ? 0 : 1 })); acts.appendChild(arch);
+  const del = el('button', 'pill pill-danger', 'Delete'); del.addEventListener('click', async () => { if (!confirm(`Delete "${p.name}" and its history? This cannot be undone.`)) return; await api(`/api/projects/${p.id}`, { method: 'DELETE' }); closeDrawer(); await load(); toast('Deleted'); }); acts.appendChild(del);
+  body.appendChild(acts);
+
+  d.scrollTop = scrollTop;
+}
+
+// ---- stage track: the main road from idea to live. Paused and Done sit off
+// it, under Details, and dim the track while they apply.
+const TRACK = ['idea', 'building', 'testing', 'handoff', 'live'];
+function stageTrack(p) {
+  const idx = TRACK.indexOf(p.stage);
+  const wrap = el('div', 'track' + (idx < 0 ? ' off' : ''));
+  const rail = el('div', 'track-rail');
+  const fill = el('i', 'track-fill');
+  fill.style.width = `${Math.max(0, idx) * 20}%`;
+  rail.appendChild(fill);
+  wrap.appendChild(rail);
+  TRACK.forEach((s, k) => {
+    const b = el('button', 'stop' + (k < idx ? ' past' : k === idx ? ' now' : ''));
+    b.type = 'button';
+    b.appendChild(el('i'));
+    b.appendChild(el('span', null, STAGE_LABEL[s]));
+    b.title = s === p.stage ? `Stage is ${STAGE_LABEL[s]}` : `Move to ${STAGE_LABEL[s]}`;
+    b.addEventListener('click', () => { if (s !== p.stage) patch(p.id, { stage: s }); });
+    wrap.appendChild(b);
+  });
+  if (idx < 0) {
+    const n = el('div', 'track-note');
+    n.appendChild(el('b', null, STAGE_LABEL[p.stage] || p.stage));
+    n.appendChild(document.createTextNode(p.stage === 'done' ? '. Finished for good. Pick a stop to reopen it.' : '. Off the road for now. Pick a stop to pick it back up.'));
+    wrap.appendChild(n);
+  }
+  return wrap;
+}
+
+function waitingCallout(p) {
+  const c = el('div', 'callout');
+  const days = p.waiting_since ? Math.max(0, Math.floor((Date.now() - Date.parse(`${p.waiting_since}T00:00:00`)) / DAY)) : null;
+  const words = el('div');
+  words.appendChild(el('b', null, `Waiting on ${p.waiting_on}`));
+  words.appendChild(el('span', null, days === null ? '' : ` · ${days === 0 ? 'since today' : `${days} day${days === 1 ? '' : 's'}`}`));
+  c.appendChild(words);
+  const stop = el('button', 'nc-btn', 'Stop waiting'); stop.type = 'button';
+  stop.addEventListener('click', () => patch(p.id, { waiting_on: '' }));
+  c.appendChild(stop);
+  return c;
+}
+
+// ---- timeline: the history log, commits and sessions in one list. Commits
+// and sessions collapse to one row per day so a busy day does not bury the rest.
+const LOG_GLYPH = { done: 'check', step: 'target', next_step: 'target', stage: 'compass', note: 'pen', field: 'clock', system: 'clock' };
+const TIMELINE_CAP = 12;
+function timelineEntries(p) {
+  const out = [];
+  for (const l of p.log || []) out.push({ at: l.at, kind: l.kind === 'done' ? 'done' : 'log', glyph: LOG_GLYPH[l.kind] || 'clock', text: l.text });
+
+  const commitDays = new Map();
+  for (const c of p.activity?.git?.detail?.recent || []) {
+    const k = dayKey(c.at);
+    const g = commitDays.get(k) || { at: c.at, subjects: [] };
+    g.subjects.push(c.subject);
+    if (Date.parse(c.at) > Date.parse(g.at)) g.at = c.at;
+    commitDays.set(k, g);
+  }
+  for (const g of commitDays.values()) {
+    const n = g.subjects.length;
+    out.push({ at: g.at, kind: 'commit', glyph: 'code', text: n === 1 ? g.subjects[0] : `${n} commits`,
+      sub: n === 1 ? 'commit' : g.subjects.slice(0, 3).join(' · ') + (n > 3 ? ` · and ${n - 3} more` : '') });
+  }
+
+  const claude = p.activity?.claude?.detail || {};
+  const lastDay = claude.last_at ? dayKey(claude.last_at) : null;
+  const sessionDays = new Map();
+  for (const t of claude.recent_sessions || []) {
+    const k = dayKey(t);
+    const g = sessionDays.get(k) || { at: t, n: 0 };
+    g.n += 1; if (Date.parse(t) > Date.parse(g.at)) g.at = t;
+    sessionDays.set(k, g);
+  }
+  for (const [k, g] of sessionDays) {
+    out.push({ at: g.at, kind: 'session', glyph: 'sparkles', text: g.n === 1 ? 'Claude session' : `${g.n} Claude sessions`,
+      sub: k === lastDay && claude.last_prompt ? `opened with “${claude.last_prompt}”` : '' });
+  }
+  return out.sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+}
+
+function timeline(p) {
+  const all = timelineEntries(p);
+  const box = el('div', 'tl');
+  if (!all.length) { box.appendChild(el('div', 'tl-empty', 'Nothing yet. Ticked steps, notes, commits and Claude sessions will show up here.')); return box; }
+  state.tlAll = state.tlAll || {};
+  const shown = state.tlAll[p.id] ? all : all.slice(0, TIMELINE_CAP);
+  let lastDay = null;
+  for (const e of shown) {
+    const k = dayKey(e.at);
+    if (k !== lastDay) {
+      lastDay = k;
+      const today = dayKey(new Date()); const yest = dayKey(new Date(Date.now() - DAY));
+      box.appendChild(el('div', 'tl-day', k === today ? 'Today' : k === yest ? 'Yesterday' : fmtDay(new Date(e.at))));
+    }
+    const r = el('div', `tli ${e.kind}`);
+    const dot = el('span', 'tl-dot'); dot.innerHTML = glyphSvg(e.glyph); r.appendChild(dot);
+    const x = el('div', 'tl-text');
+    x.appendChild(el('span', null, e.text));
+    if (e.sub) x.appendChild(el('small', null, e.sub));
+    r.appendChild(x);
+    r.appendChild(el('span', 'tl-when', fmtTime(e.at)));
+    box.appendChild(r);
+  }
+  if (all.length > TIMELINE_CAP) {
+    const more = el('button', 'tl-more', state.tlAll[p.id] ? 'Show less' : `Show all ${all.length}`);
+    more.type = 'button';
+    more.addEventListener('click', () => { state.tlAll[p.id] = !state.tlAll[p.id]; renderDrawer(state.detail || p); });
+    box.appendChild(more);
+  }
+  return box;
+}
+
+// ---- folds: a summary line you can read without opening, and the controls
+// inside. Open state survives the redraw that follows every save.
+function fold(p, key, title, preview, build) {
+  state.folds = state.folds || {};
+  const id = `${p.id}:${key}`;
+  const det = document.createElement('details');
+  det.className = 'fold';
+  det.open = !!state.folds[id];
+  const sum = el('summary');
+  sum.appendChild(el('span', 'fold-title', title));
+  sum.appendChild(el('span', 'fold-preview', preview));
+  sum.appendChild(el('span', 'fold-chev', '›'));
+  det.appendChild(sum);
+  const inner = el('div', 'fold-body');
+  if (det.open) inner.appendChild(build());
+  det.appendChild(inner);
+  det.addEventListener('toggle', () => {
+    state.folds[id] = det.open;
+    if (det.open && !inner.childNodes.length) inner.appendChild(build());
+  });
+  return det;
+}
+
+const PRIO_LABEL = { 1: 'high', 2: 'normal', 3: 'low' };
+function detailsPreview(p) {
+  const bits = [kindInfo(p.kind).label, `${PRIO_LABEL[p.priority] || 'normal'} priority`];
+  bits.push(p.waiting_on ? `waiting on ${p.waiting_on}` : 'not waiting');
+  if (p.review_after) bits.push(`snoozed to ${p.review_after}`);
+  return bits.join(' · ');
+}
+
+function detailsBody(p) {
+  const w = el('div', 'fold-grid');
   const prioF = el('div', 'field'); prioF.appendChild(el('label', null, 'Priority'));
   const prio = el('div', 'prio');
   for (const [v, lbl] of [['1', '★ High'], ['2', 'Normal'], ['3', 'Low']]) {
     const b = el('button', String(p.priority) === v ? 'on' : '', lbl); b.dataset.p = v;
     b.addEventListener('click', () => patch(p.id, { priority: v })); prio.appendChild(b);
   }
-  prioF.appendChild(prio); gNow.appendChild(prioF);
+  prioF.appendChild(prio); w.appendChild(prioF);
 
   // Kind as six labelled buttons with the definition of whichever is selected
   // shown underneath, so the meaning is on screen instead of in your head.
@@ -829,23 +1008,34 @@ function renderDrawer(p) {
   }
   kindF.appendChild(pick);
   kindF.appendChild(el('div', 'hint kindblurb', kindInfo(p.kind).blurb));
-  gNow.appendChild(kindF);
+  w.appendChild(kindF);
 
   const r3 = el('div', 'row2');
   r3.appendChild(field('Waiting on', input(p.waiting_on, (v) => patch(p.id, { waiting_on: v })), p.waiting_since ? `Since ${p.waiting_since}. After 7 days you get a nudge.` : 'A person or an outside event.'));
-  r3.appendChild(field('Snooze until', input(p.review_after || '', (v) => patch(p.id, { review_after: v }), 'date'), 'Quiets stale, no-next-step and no-backup nags.'));
-  gNow.appendChild(r3);
+  const snooze = input(p.review_after || '', (v) => patch(p.id, { review_after: v }), 'date');
+  snooze.classList.toggle('empty', !p.review_after);
+  r3.appendChild(field('Snooze until', snooze, 'Quiets stale, no-next-step and no-backup nags.'));
+  w.appendChild(r3);
 
-  // ---- signals
-  const gSig = group(body, 'Signals', 'what the scanners found', 'radar');
+  const offF = el('div', 'field'); offF.appendChild(el('label', null, 'Off the main road'));
+  const off = el('div', 'prio');
+  for (const s of ['paused', 'done']) {
+    const b = el('button', p.stage === s ? 'on' : '', STAGE_LABEL[s]);
+    b.addEventListener('click', () => patch(p.id, { stage: p.stage === s ? 'building' : s }));
+    b.title = p.stage === s ? 'Back to Building' : `Mark as ${STAGE_LABEL[s]}`;
+    off.appendChild(b);
+  }
+  offF.appendChild(off); w.appendChild(offF);
+  return w;
+}
+
+function signalsBody(p) {
+  const w = el('div', 'fold-grid');
   const sig = el('div', 'signals');
   sig.appendChild(signalRow('git', p.activity.git, gitEvidence));
   sig.appendChild(signalRow('claude', p.activity.claude, claudeEvidence));
   sig.appendChild(signalRow('fs', p.activity.fs, fsEvidence));
-  gSig.appendChild(sig);
-
-  // ---- rules
-  const gRules = group(body, 'Nags', 'flip one off to mute it for this project', 'bell');
+  w.appendChild(sig);
   const rules = el('div', 'rules');
   if (!(p.flags || []).length) rules.appendChild(el('div', 'rule', 'Nothing firing. Lovely.'));
   for (const f of p.flags || []) {
@@ -858,16 +1048,45 @@ function renderDrawer(p) {
     r.appendChild(el('span', `sev ${f.severity}`, f.severity));
     rules.appendChild(r);
   }
-  gRules.appendChild(rules);
+  w.appendChild(rules);
+  return w;
+}
 
-  // ---- looks
-  const gLooks = group(body, 'Looks', 'icon and colour', 'palette'); gLooks.id = 'looks';
+function whereBody(p) {
+  const w = el('div', 'fold-grid');
+  w.appendChild(field('Folder, relative to the workspace', input(p.path || '', (v) => patch(p.id, { path: v }))));
+  const r4 = el('div', 'row3');
+  r4.appendChild(field('Port', input(p.port || '', (v) => patch(p.id, { port: v }))));
+  r4.appendChild(field('Stale after', input(p.stale_days, (v) => patch(p.id, { stale_days: v })), 'days'));
+  r4.appendChild(field('Repo URL', input(p.repo_url || '', (v) => patch(p.id, { repo_url: v }))));
+  w.appendChild(r4);
+
+  const mf = el('div', 'field'); mf.appendChild(el('label', null, 'Transcript markers'));
+  const chips = el('div', 'chipsrow');
+  for (const m of p.markers) { const c = el('span', 'mchip'); c.appendChild(el('span', null, m)); const x = el('button', null, '×'); x.setAttribute('aria-label', `Remove marker ${m}`); x.addEventListener('click', () => patch(p.id, { markers: p.markers.filter((y) => y !== m) })); c.appendChild(x); chips.appendChild(c); }
+  if (!p.markers.length) chips.appendChild(el('span', 'hint', 'No markers, so Claude sessions cannot be matched.'));
+  mf.appendChild(chips);
+  const addM = input('', null); addM.placeholder = 'Add a marker, press Enter';
+  addM.addEventListener('keydown', (e) => { if (e.key === 'Enter' && addM.value.trim()) { e.preventDefault(); patch(p.id, { markers: [...p.markers, addM.value.trim()] }); } });
+  mf.appendChild(addM);
+  mf.appendChild(el('div', 'hint', 'Distinctive substrings only. Adding one re-reads every transcript. Never use anything in the workspace path.'));
+  w.appendChild(mf);
+  return w;
+}
+
+// ---- icon popover: colour, glyph, or an emoji, opened from the big icon.
+function iconPopover(p) {
+  const pop = el('div', 'icon-pop');
+  pop.addEventListener('click', (e) => e.stopPropagation());
+  pop.appendChild(el('div', 'pop-h', 'Colour'));
   const sw = el('div', 'swatches');
   for (const c of state.meta.colors) {
     const s = el('button', 'swatch' + (c === p.color ? ' on' : '')); s.style.background = `var(--${c})`; s.title = c;
+    s.setAttribute('aria-label', `Colour ${c}`);
     s.addEventListener('click', () => patch(p.id, { color: c })); sw.appendChild(s);
   }
-  gLooks.appendChild(sw);
+  pop.appendChild(sw);
+  pop.appendChild(el('div', 'pop-h', 'Icon'));
   const current = glyphFor(p);
   const gl = el('div', 'glyphs');
   for (const g of PICKABLE) {
@@ -876,50 +1095,12 @@ function renderDrawer(p) {
     b.addEventListener('click', () => patch(p.id, { glyph: g }));
     gl.appendChild(b);
   }
-  gLooks.appendChild(gl);
-  // An emoji still works for anything the glyphs do not cover. Typing one
-  // switches the tile to it; clicking any glyph above switches back.
+  pop.appendChild(gl);
+  // An emoji still works for anything the glyphs do not cover.
   const custom = input(p.glyph === 'emoji' ? p.icon : '', (v) => patch(p.id, v.trim() ? { icon: v, glyph: 'emoji' } : { glyph: '' }));
   custom.placeholder = 'Or use an emoji instead'; custom.className = 'emoji-input';
-  gLooks.appendChild(custom);
-
-  // ---- where
-  const gWhere = group(body, 'Where it lives', null, 'pin');
-  gWhere.appendChild(field('Folder, relative to the workspace', input(p.path || '', (v) => patch(p.id, { path: v }))));
-  const r4 = el('div', 'row3');
-  r4.appendChild(field('Port', input(p.port || '', (v) => patch(p.id, { port: v }))));
-  r4.appendChild(field('Stale after', input(p.stale_days, (v) => patch(p.id, { stale_days: v })), 'days'));
-  r4.appendChild(field('Repo URL', input(p.repo_url || '', (v) => patch(p.id, { repo_url: v }))));
-  gWhere.appendChild(r4);
-
-  // ---- markers
-  const gM = group(body, 'Transcript markers', 'how Claude sessions get matched to this', 'search');
-  const chips = el('div', 'chipsrow');
-  for (const m of p.markers) { const c = el('span', 'mchip'); c.appendChild(el('span', null, m)); const x = el('button', null, '×'); x.addEventListener('click', () => patch(p.id, { markers: p.markers.filter((y) => y !== m) })); c.appendChild(x); chips.appendChild(c); }
-  if (!p.markers.length) chips.appendChild(el('span', 'hint', 'No markers, so Claude sessions cannot be matched.'));
-  gM.appendChild(chips);
-  const addM = input('', null); addM.placeholder = 'Add a marker, press Enter';
-  addM.addEventListener('keydown', (e) => { if (e.key === 'Enter' && addM.value.trim()) { e.preventDefault(); patch(p.id, { markers: [...p.markers, addM.value.trim()] }); } });
-  gM.appendChild(addM);
-  gM.appendChild(el('div', 'hint', 'Distinctive substrings only. Adding one re-reads every transcript. Never use anything in the workspace path.'));
-
-  // ---- notes + history
-  const gN = group(body, 'Notes', null, 'pen'); gN.appendChild(textarea(p.notes, (v) => patch(p.id, { notes: v })));
-  const gL = group(body, 'History', null, 'clock');
-  const note = input('', null); note.placeholder = 'Jot a note, press Enter';
-  note.addEventListener('keydown', async (e) => { if (e.key !== 'Enter' || !note.value.trim()) return; e.preventDefault(); try { await api(`/api/projects/${p.id}/log`, { method: 'POST', body: { text: note.value.trim() } }); note.value = ''; await refreshDetail(); } catch (err) { toast(err.message, true); } });
-  gL.appendChild(note);
-  const logs = el('div', 'logs'); logs.style.marginTop = '10px';
-  for (const l of p.log || []) { const r = el('div', `logrow ${l.kind}`); r.appendChild(el('div', 'lat', (l.at || '').slice(0, 10))); r.appendChild(el('div', 'ltext', l.text)); logs.appendChild(r); }
-  gL.appendChild(logs);
-
-  // ---- actions
-  const acts = el('div', 'dactions');
-  const arch = el('button', 'pill pill-ghost', p.archived ? 'Unarchive' : 'Archive'); arch.addEventListener('click', () => patch(p.id, { archived: p.archived ? 0 : 1 })); acts.appendChild(arch);
-  const del = el('button', 'pill pill-danger', 'Delete'); del.addEventListener('click', async () => { if (!confirm(`Delete "${p.name}" and its history? This cannot be undone.`)) return; await api(`/api/projects/${p.id}`, { method: 'DELETE' }); closeDrawer(); await load(); toast('Deleted'); }); acts.appendChild(del);
-  body.appendChild(acts);
-
-  d.scrollTop = scrollTop;
+  pop.appendChild(custom);
+  return pop;
 }
 
 // ------------------------------------------------------------------ checklist
@@ -1378,7 +1559,10 @@ function wire() {
   $('#showArchived').addEventListener('change', (e) => { state.filters.archived = e.target.checked; renderFilterMenu(); load(); });
   $('#filterBtn').addEventListener('click', (e) => { e.stopPropagation(); toggleFilterMenu(); });
   $('#filterMenu').addEventListener('click', (e) => e.stopPropagation());
-  document.addEventListener('click', () => toggleFilterMenu(false));
+  document.addEventListener('click', () => {
+    toggleFilterMenu(false);
+    if (state.iconPop) { state.iconPop = null; if (state.detail) renderDrawer(state.detail); }
+  });
   $('#summary').addEventListener('click', (e) => {
     const a = e.target.closest('[data-go]'); if (!a) return;
     e.preventDefault();
@@ -1404,7 +1588,11 @@ function wire() {
 
   document.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); search.focus(); search.select(); return; }
-    if (e.key === 'Escape') { toggleFilterMenu(false); if (state.openId) closeDrawer(); }
+    if (e.key === 'Escape') {
+      toggleFilterMenu(false);
+      if (state.iconPop) { state.iconPop = null; if (state.detail) renderDrawer(state.detail); }
+      else if (state.openId) closeDrawer();
+    }
     const typing = ['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName) || document.activeElement.isContentEditable;
     if (e.key === '/' && !typing) { e.preventDefault(); search.focus(); }
   });
