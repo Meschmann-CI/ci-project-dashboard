@@ -10,9 +10,9 @@ if %errorlevel%==0 (
   exit
 )
 
-if not exist "datadashboard.db" (
+if not exist "data\dashboard.db" (
   echo First run: building the project list...
-  node srcseed.js
+  node src\seed.js
   echo.
 )
 
