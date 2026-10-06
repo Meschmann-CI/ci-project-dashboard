@@ -334,6 +334,24 @@ test('the done log lists completed steps newest first with their project, and fo
   assert.deepStrictEqual(db.listDone().filter((r) => r.project_id === p.id).map((r) => r.text), ['first']);
 });
 
+console.log('\nicons');
+
+test('the glyphs the server accepts are exactly the ones the browser can draw', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'public', 'glyphs.js'), 'utf8');
+  const body = src.slice(src.indexOf('const GLYPHS = {'), src.indexOf('};', src.indexOf('const GLYPHS = {')));
+  const drawn = [...body.matchAll(/^\s{2}([a-z]+):/gm)].map((m) => m[1]);
+  const interfaceOnly = ['bell', 'pen', 'clock', 'palette', 'check'];
+  assert.deepStrictEqual(drawn.filter((g) => !interfaceOnly.includes(g)).sort(), [...db.GLYPHS].sort());
+});
+
+test('a project takes a known glyph, "emoji", or nothing, and refuses anything else', () => {
+  const p = db.createProject({ name: 'G1', glyph: 'rocket' });
+  assert.strictEqual(p.glyph, 'rocket');
+  assert.strictEqual(db.updateProject(p.id, { glyph: 'emoji' }).glyph, 'emoji');
+  assert.strictEqual(db.updateProject(p.id, { glyph: '' }).glyph, '');
+  assert.throws(() => db.updateProject(p.id, { glyph: 'unicorn' }), /unknown glyph/);
+});
+
 console.log('\nsuggestions');
 
 const suggest = require('./suggest');

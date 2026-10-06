@@ -155,7 +155,7 @@ function resolve(ids, status) {
 // retired as 'stale' on the way out rather than shown.
 function list() {
   const open = db.rows(
-    `SELECT s.*, p.name AS project_name, p.icon, p.color, p.stage AS project_stage, p.priority
+    `SELECT s.*, p.name AS project_name, p.icon, p.color, p.glyph, p.kind, p.stage AS project_stage, p.priority
      FROM suggestions s JOIN projects p ON p.id = s.project_id
      WHERE s.status = 'open' AND p.archived = 0
      ORDER BY p.priority, p.name, s.created_at, s.id`).map(hydrate);

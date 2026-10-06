@@ -42,6 +42,25 @@ const KIND_LABEL = Object.fromEntries(KIND_INFO.map((k) => [k.id, k.label]));
 // Tile hues. Names, not hex: the front end owns the actual values so the
 // palette can change without a migration.
 const COLORS = ['coral', 'tangerine', 'marigold', 'lime', 'mint', 'sky', 'periwinkle', 'grape', 'rose', 'cocoa'];
+// Line-glyph icons a project can wear. The drawings live in public/glyphs.js;
+// this list only validates. '' means "pick one for me", 'emoji' means "show the
+// emoji instead". A test checks the two files agree.
+const GLYPHS = ['eye', 'radar', 'dollar', 'receipt', 'door', 'send', 'users', 'grid', 'camera', 'doc', 'mega',
+  'news', 'search', 'chart', 'hangar', 'laptop', 'cast', 'tools', 'cap', 'flag', 'folder', 'film', 'compass',
+  'bulb', 'clip', 'cart', 'rocket', 'flask', 'target', 'wrench', 'map', 'pin', 'lock', 'bolt', 'sprout', 'mail',
+  'calendar', 'gift', 'chat', 'globe', 'book', 'heart', 'cube', 'briefcase', 'repeat', 'home', 'code',
+  'database', 'shield', 'bank', 'sparkles'];
+// First assignment, by slug, so two projects that shared an emoji (💡, 📎) get
+// different glyphs. Anything not listed falls back to its emoji in the browser.
+const SLUG_GLYPH = {
+  'ar-tracker': 'dollar', 'project-tracker-for-alissons-team': 'eye', 'change-monitoring': 'radar',
+  'build-a-tap-portal': 'door', 'drew-s-outreach-list-tool': 'send', 'new-hires-site': 'users',
+  'product-matrix-fee-aomation-builder': 'grid', 'sitecap': 'camera', 'vendor-contracts': 'doc',
+  'project-amplify': 'mega', 'ci-prompt-newsletter': 'news', 'sales-intel': 'search', 'fidelity-alight': 'chart',
+  'tap-cost-tracker': 'receipt', 'device-manager': 'hangar', 'lab-broadcast': 'cast', 'web-tools': 'tools',
+  'training-tool': 'cap', 'sandbagger': 'flag', 'sharepoint-upgrade': 'folder', 'video-screenshots': 'film',
+  'project-dashboard': 'compass',
+};
 
 let db = null;
 
@@ -171,6 +190,14 @@ function migrate(d) {
   const add = (name, ddl) => { if (!have.has(name)) d.exec(`ALTER TABLE projects ADD COLUMN ${name} ${ddl}`); };
   add('icon', "TEXT NOT NULL DEFAULT ''");
   add('color', "TEXT NOT NULL DEFAULT ''");
+  add('glyph', "TEXT NOT NULL DEFAULT ''");
+
+  // One-time: give the existing projects their line glyphs.
+  if (!d.prepare("SELECT 1 FROM settings WHERE key = 'glyphs_v1'").get()) {
+    const set = d.prepare("UPDATE projects SET glyph = ? WHERE slug = ? AND glyph = ''");
+    for (const [slug, glyph] of Object.entries(SLUG_GLYPH)) set.run(glyph, slug);
+    d.prepare("INSERT INTO settings(key, value) VALUES ('glyphs_v1', '1')").run();
+  }
 
   // One-time: the second, coherent set of kinds.
   if (!d.prepare("SELECT 1 FROM settings WHERE key = 'kinds_v2'").get()) {
@@ -238,7 +265,7 @@ function allMarkers() {
 // steps table. Use addStep / updateStep to change what a project does next.
 const EDITABLE = ['name', 'kind', 'summary', 'path', 'repo_url', 'port', 'stage', 'priority',
   'waiting_on', 'waiting_since', 'review_after', 'stale_days', 'muted_rules',
-  'notes', 'archived', 'sort', 'icon', 'color'];
+  'notes', 'archived', 'sort', 'icon', 'color', 'glyph'];
 
 const NUMERIC = { port: null, priority: 2, stale_days: 14, archived: 0, sort: 0 };
 const DATE_FIELDS = ['waiting_since', 'review_after'];
@@ -271,6 +298,11 @@ function normalise(key, value) {
   if (key === 'color') {
     const s = String(value || '').trim().toLowerCase();
     if (s && !COLORS.includes(s)) throw new Error(`unknown color: ${s}`);
+    return s;
+  }
+  if (key === 'glyph') {
+    const s = String(value || '').trim().toLowerCase();
+    if (s && s !== 'emoji' && !GLYPHS.includes(s)) throw new Error(`unknown glyph: ${s}`);
     return s;
   }
   if (key === 'icon') {
@@ -403,7 +435,7 @@ function deleteStep(projectId, stepId) {
 // tomorrow UTC.
 function listDone({ limit = 500 } = {}) {
   return rows(`SELECT s.id, s.text, s.done_at, s.project_id,
-                      p.name AS project_name, p.icon, p.color, p.kind, p.archived
+                      p.name AS project_name, p.icon, p.color, p.glyph, p.kind, p.archived
                FROM steps s JOIN projects p ON p.id = s.project_id
                WHERE s.done = 1 AND s.done_at IS NOT NULL
                ORDER BY s.done_at DESC, s.id DESC
@@ -566,7 +598,7 @@ function allCache() {
 
 module.exports = {
   open, rows, row, run, tx, nowIso, today, safeJson,
-  DB_PATH, DATA_DIR, APP_DIR, DEFAULT_WORKSPACE_ROOT, STAGES, KINDS, KIND_INFO, KIND_LABEL, COLORS,
+  DB_PATH, DATA_DIR, APP_DIR, DEFAULT_WORKSPACE_ROOT, STAGES, KINDS, KIND_INFO, KIND_LABEL, COLORS, GLYPHS,
   getSetting, setSetting, workspaceRoot, markersVersion, allMarkers,
   listProjects, getProject, createProject, updateProject, deleteProject,
   addMarker, addLog, setActivity, slugify,

@@ -84,7 +84,7 @@ Four numbers at the top: today, this week (Monday start), the last 30 days, and 
 
 The search box and kind chips apply here too, so "what did I finish on Sitecap" is one keystroke. The count on the Done tab and the "N done this week" in the header both count the current week. Days are grouped in your local time zone, so an 11pm tick counts for today. Completed steps on archived projects still appear, because finished work is finished work. Reopening a step removes it from the log.
 
-The look is deliberately not on-brand. This is a personal tool, so it borrows Apple's rather than CI's: white shading to Apple's off-white grey down the page, SF Pro where it exists and Inter as the Windows stand-in, and the ten project hues taken from Apple's system colours. Colour is an accent on each tile, at the icon and the edge, not a wash over the card. It follows your system light or dark setting, and dark mode is a true near-black.
+The look is deliberately not on-brand. This is a personal tool, so it borrows Apple's rather than CI's: white shading to Apple's off-white grey down the page, SF Pro where it exists and Inter as the Windows stand-in, and the ten project hues taken from Apple's system colours. Each project wears an app-style icon: a white line glyph on a squircle in its colour, picked in the drawer under Looks (an emoji still works as an override). The icon is the only place a project's colour appears; cards, pills, bars and chips stay neutral, so orange keeps its meaning. It follows your system light or dark setting, and dark mode is a true near-black.
 
 The heading sets the rule for everything else: **black for structure, one orange for the thing to look at.** Anything that needs you is orange (the "need you" count, the badges, the Needs a next step band, the banner). Selected states and the In motion band are black. A black badge means a data-loss risk such as unpushed commits; an orange one means something to decide; grey is a standing note. Red appears only on Delete, the remove-step ×, and scan errors, so it keeps its meaning by staying rare. Green is kept for "good": the scan dot, completed steps, and the empty Needs a next step band.
 
@@ -186,7 +186,7 @@ src/sync.js        the context the /sync-dashboard skill reads
 src/seed.js        initial projects from the current workspace
 src/test.js        44 unit tests (rules, transcript weighting, checklist, suggestions, against a temp database)
 claude-skill/      source copy of the /sync-dashboard skill
-public/            the single-page front end
+public/            the single-page front end (glyphs.js holds the icon drawings)
 data/dashboard.db  gitignored
 ```
 

@@ -34,7 +34,24 @@ const kindInfo = (id) =>
   (state.meta.kind_info || []).find((k) => k.id === id) || { id, icon: '•', label: id || 'unfiled', blurb: '' };
 const SOURCE_ICON = { git: '🌱', claude: '✨', fs: '📁' };
 const SOURCE_LABEL = { git: 'git', claude: 'claude', fs: 'files' };
-const EMOJIS = ['🧭','💵','💻','📸','📝','📡','🧰','🎓','⛳','📣','📰','🔭','👁️','🗂️','🎬','📊','🚀','🧪','🎯','🔧','🧠','📈','🗺️','🔐','💡','🎨','🧩','⚡','🌱','🏗️','📬','🛰️','🎛️','🧮','📎','🗃️','🪄','🧵','🔬','🛒','🏦','💬','📅','🎁','🕹️','🐙','🦉','🌊'];
+
+// A project's icon: its line glyph in white on a squircle of its colour, or its
+// emoji when Matt chose that instead. Sizes: xs 26, sm 34, md 44, lg 56, xl 64.
+// glyphFor / glyphSvg come from glyphs.js.
+function appIcon(p, size = 'lg') {
+  const n = el('span', `ico ${size}`);
+  n.dataset.color = p.color || 'cocoa';
+  const g = glyphFor(p);
+  if (g) n.innerHTML = glyphSvg(g);
+  else { n.classList.add('emo'); n.textContent = p.icon || '•'; }
+  return n;
+}
+// The small monochrome mark for a kind, used on chips and the kind picker.
+function kindIcon(kind) {
+  const n = el('span', 'kglyph');
+  n.innerHTML = glyphSvg(KIND_GLYPH[kind] || 'sparkles');
+  return n;
+}
 
 // ------------------------------------------------------------------ helpers
 
@@ -93,7 +110,9 @@ async function loadMeta() {
   all.title = 'Every kind';
   chips.appendChild(all);
   for (const k of state.meta.kind_info) {
-    const b = el('button', 'chip', `${k.icon} ${k.label}`);
+    const b = el('button', 'chip');
+    b.appendChild(kindIcon(k.id));
+    b.appendChild(document.createTextNode(k.label));
     b.dataset.kind = k.id;
     b.title = k.blurb;   // hover here for the definition
     chips.appendChild(b);
@@ -283,7 +302,7 @@ function renderTiles(visible) {
     banner.hidden = false; banner.innerHTML = '';
     banner.appendChild(el('span', 'lead', `${needy.length} project${needy.length === 1 ? '' : 's'} need${needy.length === 1 ? 's' : ''} you`));
     const faces = el('span', 'faces');
-    for (const p of needy.slice(0, 8)) { const f = el('span', 'face', p.icon || '•'); f.dataset.color = p.color; faces.appendChild(f); }
+    for (const p of needy.slice(0, 8)) faces.appendChild(appIcon(p, 'xs'));
     banner.appendChild(faces);
     banner.appendChild(el('span', null, state.queue.slice(0, 2).map((q) => `${q.project_name}: ${q.label.toLowerCase()}`).join(' · ') + (state.queue.length > 2 ? ' · …' : '')));
     banner.appendChild(el('span', 'go', 'See all →'));
@@ -316,7 +335,7 @@ function tile(p, i, compact = false) {
   if (n) t.appendChild(el('span', `badge ${worstSeverity(p)}`, String(n)));
 
   const top = el('div', 'tile-top');
-  top.appendChild(el('div', 'blob', p.icon || kindInfo(p.kind).icon));
+  top.appendChild(appIcon(p, 'lg'));
   const tags = el('div', 'tile-tags');
   const st = el('span', 'tag stage', STAGE_LABEL[p.stage] || p.stage); st.dataset.stage = p.stage; tags.appendChild(st);
   const kindTag = el('span', 'tag', p.port ? `:${p.port}` : kindInfo(p.kind).label);
@@ -387,7 +406,7 @@ function renderQueue(visible) {
   items.forEach((it, i) => {
     const p = byId.get(it.project_id) || {};
     const r = el('div', `qrow ${it.severity}`); r.dataset.color = p.color || 'cocoa'; r.style.setProperty('--i', i);
-    r.appendChild(el('div', 'face', p.icon || '•'));
+    r.appendChild(appIcon(p, 'md'));
     const body = el('div'); body.appendChild(el('div', 'label', it.label)); body.appendChild(el('div', 'sub', it.detail)); r.appendChild(body);
     r.appendChild(el('div', 'who', it.project_name));
     r.addEventListener('click', () => openDrawer(it.project_id));
@@ -409,7 +428,7 @@ function renderBoard(visible) {
       const id = Number(e.dataTransfer.getData('text/plain'));
       const p = state.projects.find((x) => x.id === id);
       if (!p || p.stage === stage) return;
-      await patch(id, { stage }); toast(`${p.icon || ''} ${p.name} → ${STAGE_LABEL[stage]}`);
+      await patch(id, { stage }); toast(`${p.name} → ${STAGE_LABEL[stage]}`);
     });
     for (const p of inStage) {
       const m = el('div', 'mini'); m.dataset.color = p.color || 'cocoa'; m.draggable = true;
@@ -417,7 +436,7 @@ function renderBoard(visible) {
       m.addEventListener('dragend', () => m.classList.remove('dragging'));
       m.addEventListener('click', () => openDrawer(p.id));
       const n = queueCount(p); if (n) m.appendChild(el('span', `badge ${worstSeverity(p)}`, String(n)));
-      m.appendChild(el('div', 'face', p.icon || '•'));
+      m.appendChild(appIcon(p, 'sm'));
       m.appendChild(el('div', 'nm', p.name));
       body.appendChild(m);
     }
@@ -461,7 +480,7 @@ function renderDrawer(p) {
 
   // ---- header
   const head = el('div', 'dhead');
-  const blob = el('div', 'blob', p.icon || kindInfo(p.kind).icon); blob.title = 'Change icon below';
+  const blob = appIcon(p, 'xl'); blob.classList.add('pick'); blob.title = 'Change icon';
   blob.addEventListener('click', () => d.querySelector('#looks')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
   head.appendChild(blob);
   const titles = el('div', 'titles');
@@ -469,7 +488,7 @@ function renderDrawer(p) {
   h2.addEventListener('blur', () => { const v = h2.textContent.trim(); if (v && v !== p.name) patch(p.id, { name: v }); else h2.textContent = p.name; });
   h2.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); h2.blur(); } });
   titles.appendChild(h2);
-  const bits = [`${kindInfo(p.kind).icon} ${kindInfo(p.kind).label}`]; if (p.port) bits.push(`port ${p.port}`); if (p.newest?.at) bits.push(`last touched ${ago(p.newest.at)}`);
+  const bits = [kindInfo(p.kind).label]; if (p.port) bits.push(`port ${p.port}`); if (p.newest?.at) bits.push(`last touched ${ago(p.newest.at)}`);
   titles.appendChild(el('div', 'sub', bits.join(' · ')));
   head.appendChild(titles);
   const close = el('button', 'close', '×'); close.setAttribute('aria-label', 'Close'); close.addEventListener('click', closeDrawer); head.appendChild(close);
@@ -479,7 +498,7 @@ function renderDrawer(p) {
 
   // ---- now
   const openN = (p.steps || []).filter((s) => !s.done).length;
-  const gNow = group(body, '🎯 Up next', openN ? `${openN} step${openN === 1 ? '' : 's'} queued · top one is the next step` : 'nothing queued');
+  const gNow = group(body, 'Up next', openN ? `${openN} step${openN === 1 ? '' : 's'} queued · top one is the next step` : 'nothing queued');
   gNow.appendChild(checklist(p));
 
   const mine = state.suggestions.filter((s) => s.project_id === p.id).length;
@@ -500,7 +519,7 @@ function renderDrawer(p) {
 
   const prioF = el('div', 'field'); prioF.appendChild(el('label', null, 'Priority'));
   const prio = el('div', 'prio');
-  for (const [v, lbl] of [['1', '🔥 High'], ['2', 'Normal'], ['3', 'Low']]) {
+  for (const [v, lbl] of [['1', '★ High'], ['2', 'Normal'], ['3', 'Low']]) {
     const b = el('button', String(p.priority) === v ? 'on' : '', lbl); b.dataset.p = v;
     b.addEventListener('click', () => patch(p.id, { priority: v })); prio.appendChild(b);
   }
@@ -513,7 +532,7 @@ function renderDrawer(p) {
   const pick = el('div', 'kindpick');
   for (const k of state.meta.kind_info) {
     const b = el('button', 'kindbtn' + (k.id === p.kind ? ' on' : ''));
-    b.appendChild(el('span', 'ki', k.icon));
+    const ki = kindIcon(k.id); ki.classList.add('ki'); b.appendChild(ki);
     b.appendChild(el('span', 'kl', k.label));
     b.title = k.blurb;
     b.addEventListener('click', () => { if (k.id !== p.kind) patch(p.id, { kind: k.id }); });
@@ -529,7 +548,7 @@ function renderDrawer(p) {
   gNow.appendChild(r3);
 
   // ---- signals
-  const gSig = group(body, '📡 Signals', 'what the scanners found');
+  const gSig = group(body, 'Signals', 'what the scanners found', 'radar');
   const sig = el('div', 'signals');
   sig.appendChild(signalRow('git', p.activity.git, gitEvidence));
   sig.appendChild(signalRow('claude', p.activity.claude, claudeEvidence));
@@ -537,7 +556,7 @@ function renderDrawer(p) {
   gSig.appendChild(sig);
 
   // ---- rules
-  const gRules = group(body, '🔔 Nags', 'flip one off to mute it for this project');
+  const gRules = group(body, 'Nags', 'flip one off to mute it for this project', 'bell');
   const rules = el('div', 'rules');
   if (!(p.flags || []).length) rules.appendChild(el('div', 'rule', 'Nothing firing. Lovely.'));
   for (const f of p.flags || []) {
@@ -553,21 +572,30 @@ function renderDrawer(p) {
   gRules.appendChild(rules);
 
   // ---- looks
-  const gLooks = group(body, '🎨 Looks'); gLooks.id = 'looks';
+  const gLooks = group(body, 'Looks', 'icon and colour', 'palette'); gLooks.id = 'looks';
   const sw = el('div', 'swatches');
   for (const c of state.meta.colors) {
     const s = el('button', 'swatch' + (c === p.color ? ' on' : '')); s.style.background = `var(--${c})`; s.title = c;
     s.addEventListener('click', () => patch(p.id, { color: c })); sw.appendChild(s);
   }
   gLooks.appendChild(sw);
-  const em = el('div', 'emojis');
-  for (const e of EMOJIS) { const b = el('button', 'emoji' + (e === p.icon ? ' on' : ''), e); b.addEventListener('click', () => patch(p.id, { icon: e })); em.appendChild(b); }
-  gLooks.appendChild(em);
-  const custom = input(p.icon, (v) => patch(p.id, { icon: v })); custom.placeholder = 'Or paste any emoji'; custom.style.marginTop = '8px'; custom.style.width = '200px';
+  const current = glyphFor(p);
+  const gl = el('div', 'glyphs');
+  for (const g of PICKABLE) {
+    const b = el('button', 'glyphbtn' + (g === current ? ' on' : ''));
+    b.innerHTML = glyphSvg(g); b.title = g; b.setAttribute('aria-label', `Use the ${g} icon`);
+    b.addEventListener('click', () => patch(p.id, { glyph: g }));
+    gl.appendChild(b);
+  }
+  gLooks.appendChild(gl);
+  // An emoji still works for anything the glyphs do not cover. Typing one
+  // switches the tile to it; clicking any glyph above switches back.
+  const custom = input(p.glyph === 'emoji' ? p.icon : '', (v) => patch(p.id, v.trim() ? { icon: v, glyph: 'emoji' } : { glyph: '' }));
+  custom.placeholder = 'Or use an emoji instead'; custom.className = 'emoji-input';
   gLooks.appendChild(custom);
 
   // ---- where
-  const gWhere = group(body, '📍 Where it lives');
+  const gWhere = group(body, 'Where it lives', null, 'pin');
   gWhere.appendChild(field('Folder, relative to the workspace', input(p.path || '', (v) => patch(p.id, { path: v }))));
   const r4 = el('div', 'row3');
   r4.appendChild(field('Port', input(p.port || '', (v) => patch(p.id, { port: v }))));
@@ -576,7 +604,7 @@ function renderDrawer(p) {
   gWhere.appendChild(r4);
 
   // ---- markers
-  const gM = group(body, '🔎 Transcript markers', 'how Claude sessions get matched to this');
+  const gM = group(body, 'Transcript markers', 'how Claude sessions get matched to this', 'search');
   const chips = el('div', 'chipsrow');
   for (const m of p.markers) { const c = el('span', 'mchip'); c.appendChild(el('span', null, m)); const x = el('button', null, '×'); x.addEventListener('click', () => patch(p.id, { markers: p.markers.filter((y) => y !== m) })); c.appendChild(x); chips.appendChild(c); }
   if (!p.markers.length) chips.appendChild(el('span', 'hint', 'No markers, so Claude sessions cannot be matched.'));
@@ -587,8 +615,8 @@ function renderDrawer(p) {
   gM.appendChild(el('div', 'hint', 'Distinctive substrings only. Adding one re-reads every transcript. Never use anything in the workspace path.'));
 
   // ---- notes + history
-  const gN = group(body, '📓 Notes'); gN.appendChild(textarea(p.notes, (v) => patch(p.id, { notes: v })));
-  const gL = group(body, '🕰️ History');
+  const gN = group(body, 'Notes', null, 'pen'); gN.appendChild(textarea(p.notes, (v) => patch(p.id, { notes: v })));
+  const gL = group(body, 'History', null, 'clock');
   const note = input('', null); note.placeholder = 'Jot a note, press Enter';
   note.addEventListener('keydown', async (e) => { if (e.key !== 'Enter' || !note.value.trim()) return; e.preventDefault(); try { await api(`/api/projects/${p.id}/log`, { method: 'POST', body: { text: note.value.trim() } }); note.value = ''; await refreshDetail(); } catch (err) { toast(err.message, true); } });
   gL.appendChild(note);
@@ -704,8 +732,12 @@ async function steps(pid, method, suffix, body) {
   } catch (e) { toast(e.message, true); }
 }
 
-function group(parent, title, sub) {
-  const g = el('div', 'dgroup'); const h = el('h3', null, title); if (sub) h.appendChild(el('small', null, sub)); g.appendChild(h); parent.appendChild(g); return g;
+function group(parent, title, sub, glyph = 'target') {
+  const g = el('div', 'dgroup'); const h = el('h3');
+  const mark = el('span', 'hglyph'); mark.innerHTML = glyphSvg(glyph); h.appendChild(mark);
+  h.appendChild(document.createTextNode(title));
+  if (sub) h.appendChild(el('small', null, sub));
+  g.appendChild(h); parent.appendChild(g); return g;
 }
 function field(label, control, hint) { const f = el('div', 'field'); f.appendChild(el('label', null, label)); f.appendChild(control); if (hint) f.appendChild(el('div', 'hint', hint)); return f; }
 // Save on blur or Enter, never per keystroke, so the log stays readable.
@@ -794,11 +826,12 @@ function renderDone() {
   const items = doneVisible();
   const s = doneStats(items);
 
+  const side = el('aside', 'done-side');
   const stats = el('div', 'done-stats');
   for (const [n, lbl] of [[s.today, 'today'], [s.thisWeek, 'this week'], [s.last30, 'last 30 days'], [s.streak, s.streak === 1 ? 'day streak' : 'day streak']]) {
     const t = el('div', 'stat'); t.appendChild(el('div', 'n', String(n))); t.appendChild(el('div', 'l', lbl)); stats.appendChild(t);
   }
-  box.appendChild(stats);
+  side.appendChild(stats);
 
   const max = Math.max(1, ...s.strip.map((d) => d.n));
   const strip = el('div', 'strip');
@@ -810,7 +843,8 @@ function renderDone() {
     if (d.n) cell.appendChild(el('span', 'nn', String(d.n)));
     strip.appendChild(cell);
   }
-  box.appendChild(strip);
+  side.appendChild(strip);
+  box.appendChild(side);
 
   if (!items.length) {
     const e = el('div', 'empty', 'Nothing ticked off yet.');
@@ -840,7 +874,7 @@ function renderDone() {
     }
     const row = el('div', 'donerow'); row.dataset.color = r.color || 'cocoa';
     row.appendChild(el('span', 'dcheck', '✓'));
-    row.appendChild(el('span', 'face', r.icon || '•'));
+    row.appendChild(appIcon(r, 'sm'));
     const body = el('div', 'body'); body.appendChild(el('div', 'txt', r.text)); body.appendChild(el('div', 'proj', r.project_name)); row.appendChild(body);
     row.appendChild(el('span', 'time', fmtTime(r.done_at)));
     row.addEventListener('click', () => openDrawer(r.project_id));
@@ -918,7 +952,7 @@ function renderSuggested() {
     const first = list[0];
     const g = el('section', 'sug-group'); g.dataset.color = first.color || 'cocoa'; g.style.setProperty('--i', i++);
     const gh = el('div', 'sug-ghead');
-    gh.appendChild(el('span', 'face', first.icon || '•'));
+    gh.appendChild(appIcon(first, 'sm'));
     const nm = el('button', 'sug-pname', first.project_name); nm.title = 'Open project';
     nm.addEventListener('click', () => openDrawer(pid));
     gh.appendChild(nm);
