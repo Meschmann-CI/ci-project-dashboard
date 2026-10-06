@@ -28,13 +28,15 @@ A tracker that needs hand-updating rots in a fortnight. This one derives most of
 
 ## What you see
 
-The main view is a grid of **tiles**, one per project, split into three bands top to bottom:
+The main view is **Home**. At the top, **Up next** lists the first open step of every project in motion, high priority first, five at a time; tick one there and the project's next step takes its place. Below that, one tile per project, split into three bands:
 
 | band | what lands here | why |
 |---|---|---|
 | **In motion** | active stage (idea, building, testing, handoff) with at least one open step | the work. Badges first, then priority |
 | **Needs a next step** | active stage, empty checklist | tick off the last step and a project drops here on its own. Empty is the good state |
-| **Live & parked** | live, paused, done, and ideas with nothing queued | compact, faded tiles. Live things sort first, and a live project with a queued step or a badge still shows it |
+| **Live & parked** | live, paused, done, and ideas with nothing queued | a compact dock of rows instead of tiles. Live things sort first |
+
+Each tile shows the project's icon (with its attention count on it, like an app badge), its stage as quiet text, the next step, a 30-day activity strip (one bar per day: a commit counts 1, a Claude session that worked on it counts 2) and a ring of done versus open steps. The figures in the summary under the greeting are links to where you deal with them. Kind, sort and archived live in one filter menu; the search box filters the board and offers projects to jump to (Ctrl K or /).
 
 Stage decides whether a project is active; the checklist decides whether there is anything to do. Nothing else moves tiles between bands, so the layout is predictable.
 

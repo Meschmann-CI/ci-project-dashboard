@@ -35,6 +35,7 @@ const STRONG_WEIGHT = 3;    // a tool call counts for three mentions in prose
 
 const BIG_LINE = 1_000_000;
 const RECENT_COMMITS = 60;
+const RECENT_DAYS = 30;
 
 // ---------------------------------------------------------------- job state
 
@@ -463,8 +464,11 @@ function sessionsByProject(projects, cacheRows) {
 }
 
 // Aggregate per-marker hits into a per-project verdict.
-function rollUpClaude(projects, cacheRows) {
+function rollUpClaude(projects, cacheRows, now = Date.now()) {
   const out = new Map();
+  // Session times from the last 30 days, so a tile can draw a day-by-day
+  // activity strip without another pass over the transcripts.
+  const since = now - RECENT_DAYS * 86400000;
   const perFile = perFileScores(projects, cacheRows);
 
   for (const p of projects) {
@@ -474,6 +478,7 @@ function rollUpClaude(projects, cacheRows) {
     let weak = 0;
     let lastAt = null;
     let lastPrompt = null;
+    const recent = [];
 
     for (const { row: r, byProject, sessionScore } of perFile) {
       const hit = byProject.get(p.id);
@@ -484,12 +489,14 @@ function rollUpClaude(projects, cacheRows) {
       strong += hit.s;
       weak += hit.w;
       const when = hit.ts || r.session_end;
+      if (when && Date.parse(when) >= since) recent.push(when);
       if (when && (!lastAt || when > lastAt)) {
         lastAt = when;
         lastPrompt = r.first_prompt || null;
       }
     }
-    if (sessions) out.set(p.id, { sessions, strong, weak, last_at: lastAt, last_prompt: lastPrompt });
+    recent.sort();
+    if (sessions) out.set(p.id, { sessions, strong, weak, last_at: lastAt, last_prompt: lastPrompt, recent_sessions: recent.slice(-60) });
   }
   return out;
 }

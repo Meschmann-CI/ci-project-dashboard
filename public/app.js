@@ -101,28 +101,74 @@ async function api(url, opts = {}) {
 
 // ------------------------------------------------------------------ loading
 
+const SORTS = [['attention', 'Needs attention first'], ['recent', 'Recently active'], ['priority', 'Priority'], ['name', 'Name']];
+
 async function loadMeta() {
   state.meta = await api('/api/meta');
-  const chips = $('#kindChips');
-  chips.innerHTML = '';
-  const all = el('button', 'chip on', 'All');
-  all.dataset.kind = '';
-  all.title = 'Every kind';
-  chips.appendChild(all);
+  renderFilterMenu();
+}
+
+// Kind, sort and archived live in one menu, so the toolbar is one row.
+function renderFilterMenu() {
+  const kinds = $('#kindChips'); kinds.innerHTML = '';
+  const opt = (label, on, onPick, mark, title) => {
+    const b = el('button', 'menu-item' + (on ? ' on' : ''));
+    b.type = 'button';
+    if (mark) b.appendChild(mark); else b.appendChild(el('span', 'kglyph'));
+    b.appendChild(el('span', 'mi-label', label));
+    b.appendChild(el('span', 'mi-check', on ? '✓' : ''));
+    if (title) b.title = title;
+    b.addEventListener('click', () => { onPick(); renderFilterMenu(); render(); });
+    return b;
+  };
+  kinds.appendChild(opt('All kinds', !state.filters.kind, () => { state.filters.kind = ''; }));
   for (const k of state.meta.kind_info) {
-    const b = el('button', 'chip');
-    b.appendChild(kindIcon(k.id));
-    b.appendChild(document.createTextNode(k.label));
-    b.dataset.kind = k.id;
-    b.title = k.blurb;   // hover here for the definition
-    chips.appendChild(b);
+    kinds.appendChild(opt(k.label, state.filters.kind === k.id, () => { state.filters.kind = k.id; }, kindIcon(k.id), k.blurb));
   }
-  chips.addEventListener('click', (e) => {
-    const b = e.target.closest('.chip'); if (!b) return;
-    state.filters.kind = b.dataset.kind;
-    chips.querySelectorAll('.chip').forEach((c) => c.classList.toggle('on', c === b));
-    render();
+  const sorts = $('#sortList'); sorts.innerHTML = '';
+  for (const [id, label] of SORTS) sorts.appendChild(opt(label, state.filters.sort === id, () => { state.filters.sort = id; }));
+
+  const kind = state.meta.kind_info.find((k) => k.id === state.filters.kind);
+  const lbl = $('#filterLabel'); lbl.innerHTML = '';
+  if (kind) lbl.appendChild(kindIcon(kind.id));
+  lbl.appendChild(document.createTextNode(kind ? kind.label : 'All kinds'));
+  $('#filterBtn').classList.toggle('on', !!kind || state.filters.archived);
+}
+
+function toggleFilterMenu(open) {
+  const m = $('#filterMenu'); const b = $('#filterBtn');
+  const show = open ?? m.hidden;
+  m.hidden = !show; b.setAttribute('aria-expanded', String(show));
+}
+
+// ---- search: filters the board as you type, and offers projects to jump to.
+function renderJump() {
+  const box = $('#jump'); const q = $('#search').value.trim().toLowerCase();
+  if (!q) { box.hidden = true; return; }
+  const hits = state.projects
+    .map((p) => ({ p, at: p.name.toLowerCase().indexOf(q), other: `${p.next_step} ${p.summary}`.toLowerCase().includes(q) }))
+    .filter((h) => h.at >= 0 || h.other)
+    .sort((a, b) => (a.at < 0) - (b.at < 0) || a.at - b.at || a.p.name.localeCompare(b.p.name))
+    .slice(0, 6);
+  box.innerHTML = '';
+  state.jumpIndex = Math.min(state.jumpIndex || 0, Math.max(0, hits.length - 1));
+  if (!hits.length) { box.appendChild(el('div', 'jump-empty', 'No project matches. The board below is filtered too.')); box.hidden = false; return; }
+  hits.forEach(({ p }, k) => {
+    const r = el('button', 'jump-row' + (k === state.jumpIndex ? ' on' : ''));
+    r.type = 'button'; r.setAttribute('role', 'option');
+    r.appendChild(appIcon(p, 'xs'));
+    r.appendChild(el('span', 'jr-name', p.name));
+    r.appendChild(el('span', 'jr-sub', STAGE_LABEL[p.stage] || p.stage));
+    r.addEventListener('mousedown', (e) => { e.preventDefault(); jumpTo(p.id); });
+    box.appendChild(r);
   });
+  box.hidden = false;
+  state.jumpHits = hits.map((h) => h.p.id);
+}
+function jumpTo(id) {
+  $('#jump').hidden = true;
+  $('#search').blur();
+  openDrawer(id);
 }
 
 async function load() {
@@ -185,13 +231,15 @@ function renderHero() {
   const stalled = active.filter((p) => bandOf(p) === 'stalled').length;
   const parked = active.filter((p) => bandOf(p) === 'parked').length;
   const ds = doneStats(state.done);
+  // Each figure that asks for something is a link to where you deal with it.
+  const go = (where, text) => `<a class="need" href="#" data-go="${where}">${text}</a>`;
   $('#summary').innerHTML =
     `<b>${motion}</b> in motion · ` +
-    (stalled ? `<span class="need">${stalled} need${stalled === 1 ? 's' : ''} a next step</span>` : `<b>0</b> stalled`) +
+    (stalled ? go('stalled', `${stalled} need${stalled === 1 ? 's' : ''} a next step`) : `<b>0</b> stalled`) +
     ` · <b>${parked}</b> live &amp; parked · ` +
-    (need ? `<span class="need">${need} need${need === 1 ? 's' : ''} you</span>` : `<b style="color:var(--ok)">nothing needs you</b>`) +
+    (need ? go('queue', `${need} need${need === 1 ? 's' : ''} you`) : `<b style="color:var(--ok)">nothing needs you</b>`) +
     (ds.thisWeek ? ` · <b class="good">${ds.thisWeek}</b> done this week` : '') +
-    (state.suggestions.length ? ` · <span class="need">${state.suggestions.length} suggested update${state.suggestions.length === 1 ? '' : 's'}</span>` : '');
+    (state.suggestions.length ? ` · ${go('suggested', `${state.suggestions.length} suggested update${state.suggestions.length === 1 ? '' : 's'}`)}` : '');
 }
 
 function renderScan() {
@@ -264,6 +312,7 @@ function parkedOrder(a, b) {
 }
 
 function renderTiles(visible) {
+  renderUpNext(visible);
   const box = $('#tiles'); box.innerHTML = '';
   let i = 0;
 
@@ -273,6 +322,7 @@ function renderTiles(visible) {
     if (band.id === 'parked' && !list.length) continue;
 
     const sec = el('section', `band band-${band.tone}`);
+    sec.id = `band-${band.id}`;
     const head = el('div', 'band-head');
     head.appendChild(el('span', 'band-dot'));
     head.appendChild(el('h2', 'band-title', band.title));
@@ -280,9 +330,17 @@ function renderTiles(visible) {
     head.appendChild(el('span', 'band-desc', band.desc));
     sec.appendChild(head);
 
-    const grid = el('div', 'tiles' + (band.compact ? ' compact' : ''));
+    // Live and parked mostly run themselves, so they get a compact dock of rows
+    // instead of ten more cards competing with the work above.
+    if (band.compact) {
+      sec.appendChild(dock(list));
+      box.appendChild(sec);
+      continue;
+    }
+
+    const grid = el('div', 'tiles');
     if (!list.length && band.empty) grid.appendChild(el('div', 'band-empty', band.empty));
-    for (const p of list) grid.appendChild(tile(p, i++, band.compact));
+    for (const p of list) grid.appendChild(tile(p, i++));
 
     if (band.id === 'motion') {
       const add = el('div', 'tile new');
@@ -295,100 +353,205 @@ function renderTiles(visible) {
     sec.appendChild(grid);
     box.appendChild(sec);
   }
-
-  const banner = $('#banner');
-  const needy = state.projects.filter((p) => queueCount(p) > 0);
-  if (needy.length) {
-    banner.hidden = false; banner.innerHTML = '';
-    banner.appendChild(el('span', 'lead', `${needy.length} project${needy.length === 1 ? '' : 's'} need${needy.length === 1 ? 's' : ''} you`));
-    const faces = el('span', 'faces');
-    for (const p of needy.slice(0, 8)) faces.appendChild(appIcon(p, 'xs'));
-    banner.appendChild(faces);
-    banner.appendChild(el('span', null, state.queue.slice(0, 2).map((q) => `${q.project_name}: ${q.label.toLowerCase()}`).join(' · ') + (state.queue.length > 2 ? ' · …' : '')));
-    banner.appendChild(el('span', 'go', 'See all →'));
-    banner.onclick = () => setView('queue');
-  } else banner.hidden = true;
-
-  const sb = $('#sugBanner');
-  const ns = state.suggestions.length;
-  if (ns) {
-    sb.hidden = false; sb.innerHTML = '';
-    sb.appendChild(el('span', 'lead', `✨ ${ns} suggested update${ns === 1 ? '' : 's'}`));
-    const projs = [...new Set(state.suggestions.map((s) => s.project_name))];
-    sb.appendChild(el('span', null, `from work done outside the app: ${projs.slice(0, 3).join(', ')}${projs.length > 3 ? ` and ${projs.length - 3} more` : ''}`));
-    sb.appendChild(el('span', 'go', 'Review →'));
-    sb.onclick = () => setView('suggested');
-  } else sb.hidden = true;
 }
 
-function tile(p, i, compact = false) {
-  const t = el('article', 'tile' + (compact ? ' compact' : ''));
+// ---- pieces shared by tiles, Up next and the dock
+
+// The attention count sits on the icon, like a notification on an app. Black
+// for a data-loss risk, orange for something to decide, grey for a note.
+function badgedIcon(p, size) {
+  const ico = appIcon(p, size);
+  const n = queueCount(p);
+  if (n) ico.appendChild(el('span', `bdg ${worstSeverity(p)}`, String(n)));
+  return ico;
+}
+
+function stageLabel(p) {
+  const s = el('span', 'stg');
+  s.dataset.stage = p.stage;
+  s.appendChild(el('i'));
+  s.appendChild(document.createTextNode(STAGE_LABEL[p.stage] || p.stage));
+  return s;
+}
+
+// Thirty days of activity, oldest first, one number per local calendar day.
+// A commit counts 1 and a Claude session that worked on the project counts 2,
+// so a day of real work stands taller than a stray commit.
+const ACTIVITY_DAYS = 30;
+function activityDays(p) {
+  const out = new Array(ACTIVITY_DAYS).fill(0);
+  const today = startOfDay(new Date()).getTime();
+  const add = (iso, w) => {
+    const t = Date.parse(iso || '');
+    if (Number.isNaN(t)) return;
+    const back = Math.round((today - startOfDay(new Date(t)).getTime()) / DAY);
+    if (back >= 0 && back < ACTIVITY_DAYS) out[ACTIVITY_DAYS - 1 - back] += w;
+  };
+  for (const c of p.activity?.git?.detail?.recent || []) add(c.at, 1);
+  for (const s of p.activity?.claude?.detail?.recent_sessions || []) add(s, 2);
+  return out;
+}
+
+function spark(p) {
+  const days = activityDays(p);
+  const max = Math.max(4, ...days);
+  const total = days.reduce((a, b) => a + b, 0);
+  const s = el('div', 'spark');
+  s.setAttribute('role', 'img');
+  s.setAttribute('aria-label', total ? 'Activity over the last 30 days' : 'No commits or sessions in the last 30 days');
+  days.forEach((v, k) => {
+    const bar = el('i', v ? '' : 'z');
+    if (v) bar.style.height = `${Math.max(14, Math.round((v / max) * 100))}%`;
+    const d = new Date(Date.now() - (ACTIVITY_DAYS - 1 - k) * DAY);
+    bar.title = `${fmtDay(d)}: ${v ? `${v} activity` : 'quiet'}`;
+    s.appendChild(bar);
+  });
+  return s;
+}
+
+// Open versus done steps as a ring that fills green as the checklist empties.
+function stepRing(p) {
+  const done = (p.steps || []).filter((s) => s.done).length;
+  const total = done + openSteps(p);
+  const r = 10, C = 2 * Math.PI * r, f = total ? done / total : 0;
+  const w = el('span', 'ring');
+  w.title = `${done} of ${total} steps done`;
+  w.innerHTML = `<svg viewBox="0 0 26 26" aria-hidden="true"><circle cx="13" cy="13" r="${r}" class="track"/>`
+    + `<circle cx="13" cy="13" r="${r}" class="fill" stroke-dasharray="${(C * f).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 13 13)"/></svg>`;
+  return w;
+}
+
+function lastActive(p) {
+  const at = newestOf(p);
+  if (!at) return state.scan?.everScanned ? 'no activity yet' : 'not scanned yet';
+  const a = ago(at);
+  return a === 'just now' ? 'active just now' : `active ${a}`;
+}
+
+function nextLine(p) {
+  const next = el('p', 'tile-next' + (p.next_step ? '' : ' none'));
+  if (p.next_step) {
+    next.textContent = p.next_step;
+    if (p.waiting_on) { next.appendChild(document.createTextNode(' ')); next.appendChild(el('span', 'wait', `(waiting on ${p.waiting_on})`)); }
+  } else if (['paused', 'done', 'live', 'idea'].includes(p.stage)) {
+    next.textContent = p.summary || 'No next step needed right now.';
+    next.classList.remove('none');
+  } else next.textContent = 'Needs a next step';
+  return next;
+}
+
+function tile(p, i) {
+  const t = el('article', 'tile');
   t.dataset.color = p.color || 'cocoa';
   t.style.setProperty('--i', i);
-  if (['paused', 'done'].includes(p.stage)) t.classList.add('is-quiet');
-  const hasOpen = openSteps(p) > 0;
   t.addEventListener('click', () => openDrawer(p.id));
 
-  const n = queueCount(p);
-  // Badge colour carries the worst severity: black for data-loss risk, orange for
-  // something to decide, grey for a standing note.
-  if (n) t.appendChild(el('span', `badge ${worstSeverity(p)}`, String(n)));
-
   const top = el('div', 'tile-top');
-  top.appendChild(appIcon(p, 'lg'));
-  const tags = el('div', 'tile-tags');
-  const st = el('span', 'tag stage', STAGE_LABEL[p.stage] || p.stage); st.dataset.stage = p.stage; tags.appendChild(st);
-  const kindTag = el('span', 'tag', p.port ? `:${p.port}` : kindInfo(p.kind).label);
-  kindTag.title = p.port ? `Runs on port ${p.port}` : kindInfo(p.kind).blurb;
-  tags.appendChild(kindTag);
-  if (p.priority === 1) tags.appendChild(el('span', 'tag hot', '★ high'));
-  top.appendChild(tags);
+  top.appendChild(badgedIcon(p, 'lg'));
+  top.appendChild(stageLabel(p));
   t.appendChild(top);
 
-  t.appendChild(el('h3', 'tile-name', p.name));
+  const name = el('h3', 'tile-name', p.name);
+  if (p.priority === 1) { const st = el('span', 'star', '★'); st.title = 'High priority'; name.appendChild(st); }
+  t.appendChild(name);
+  t.appendChild(nextLine(p));
 
-  // Compact tiles (the parked band) only spend a line on the next step when
-  // there genuinely is one queued; otherwise the name and pulses are enough.
-  if (!compact || hasOpen) {
-    const next = el('p', 'tile-next' + (p.next_step ? '' : ' none'));
-    if (p.next_step) {
-      next.textContent = p.next_step;
-      if (p.waiting_on) { next.appendChild(document.createTextNode(' ')); next.appendChild(el('span', 'wait', `(waiting on ${p.waiting_on})`)); }
-    } else next.textContent = ['paused', 'done', 'live', 'idea'].includes(p.stage) ? (p.summary || 'No next step needed right now.') : 'Needs a next step';
-    if (!p.next_step && ['paused', 'done', 'live', 'idea'].includes(p.stage)) next.classList.remove('none');
-    t.appendChild(next);
-  }
-
-  const openN = openSteps(p);
-  const doneN = (p.steps || []).filter((s) => s.done).length;
-  if (openN > 1 || doneN) {
-    const m = el('div', 'tile-steps');
-    if (openN > 1) m.appendChild(el('span', 'tchip', `+${openN - 1} more`));
-    if (doneN) m.appendChild(el('span', 'tchip done', `✓ ${doneN} done`));
-    t.appendChild(m);
-  }
-
-  if (!compact) {
-    const prog = el('div', 'progress ' + (p.stage === 'paused' ? 'paused' : p.stage === 'done' ? 'done' : ''));
-    const step = STAGE_STEP[p.stage] || 0;
-    for (let k = 1; k <= 5; k += 1) prog.appendChild(el('i', k <= step ? 'fill' : ''));
-    t.appendChild(prog);
-  }
-
-  const pulses = el('div', 'pulses');
-  let any = false;
-  for (const s of ['git', 'claude', 'fs']) {
-    const a = p.activity?.[s]; if (!a || !a.last_at) continue;
-    any = true;
-    const pu = el('span', `pulse ${freshness(a.last_at)}`);
-    pu.appendChild(el('i'));
-    pu.appendChild(el('span', 'lbl', SOURCE_LABEL[s]));
-    pu.appendChild(document.createTextNode(' ' + shortAgo(a.last_at)));
-    pulses.appendChild(pu);
-  }
-  if (!any) { const pu = el('span', 'pulse'); pu.appendChild(el('i')); pu.appendChild(el('span', 'lbl', state.scan?.everScanned ? 'no signals yet' : 'not scanned yet')); pulses.appendChild(pu); }
-  t.appendChild(pulses);
+  // The activity strip gets the full width; the step count and freshness sit
+  // on one line underneath it.
+  const foot = el('div', 'tile-foot');
+  foot.appendChild(spark(p));
+  const meta = el('div', 'tile-meta');
+  const open = openSteps(p);
+  const done = (p.steps || []).filter((s) => s.done).length;
+  const count = el('span', 'tile-count');
+  count.appendChild(stepRing(p));
+  count.appendChild(el('b', null, open ? `${open} open` : done ? `${done} done` : 'no steps'));
+  meta.appendChild(count);
+  meta.appendChild(el('span', 'tile-fresh', lastActive(p)));
+  foot.appendChild(meta);
+  t.appendChild(foot);
   return t;
+}
+
+function dock(list) {
+  const d = el('div', 'dock');
+  list.forEach((p, k) => {
+    const r = el('button', 'dk' + (['paused', 'done'].includes(p.stage) ? ' is-quiet' : ''));
+    r.type = 'button';
+    r.dataset.color = p.color || 'cocoa';
+    r.style.setProperty('--i', k);
+    r.appendChild(badgedIcon(p, 'sm'));
+    const body = el('span', 'dk-body');
+    body.appendChild(el('span', 'dk-name', p.name));
+    const what = p.next_step || p.waiting_on && `Waiting on ${p.waiting_on}` || p.summary || '';
+    body.appendChild(el('span', 'dk-sub', `${STAGE_LABEL[p.stage] || p.stage}${what ? ` · ${what}` : ''}`));
+    r.appendChild(body);
+    r.appendChild(spark(p));
+    r.addEventListener('click', () => openDrawer(p.id));
+    d.appendChild(r);
+  });
+  return d;
+}
+
+// ---- Up next: the top step of every project in motion, tickable in place.
+
+const UPNEXT_CAP = 5;
+function renderUpNext(visible) {
+  const box = $('#upnext'); box.innerHTML = '';
+  const rows = visible
+    .filter((p) => bandOf(p) === 'motion' && p.next_step)
+    .sort((a, b) => a.priority - b.priority || (newestOf(b) || '').localeCompare(newestOf(a) || '') || a.name.localeCompare(b.name));
+  box.hidden = !rows.length;
+  if (!rows.length) return;
+
+  const lead = el('div', 'un-lead');
+  const words = el('div');
+  words.appendChild(el('h2', 'un-title', 'Up next'));
+  words.appendChild(el('p', 'un-desc', 'The top step on each project in motion. Tick it here.'));
+  lead.appendChild(words);
+  const big = el('div', 'un-big', String(rows.length));
+  big.appendChild(el('small', null, rows.length === 1 ? 'project moving' : 'projects moving'));
+  lead.appendChild(big);
+  box.appendChild(lead);
+
+  const list = el('div', 'un-list');
+  const shown = state.upAll ? rows : rows.slice(0, UPNEXT_CAP);
+  shown.forEach((p, k) => list.appendChild(upRow(p, k)));
+  if (rows.length > UPNEXT_CAP) {
+    const rest = rows.slice(UPNEXT_CAP);
+    const more = el('button', 'un-more', state.upAll ? 'Show fewer' : `${rest.length} more: ${rest.map((p) => p.name).join(', ')}`);
+    more.type = 'button';
+    more.addEventListener('click', () => { state.upAll = !state.upAll; renderUpNext(sorted(filtered())); });
+    list.appendChild(more);
+  }
+  box.appendChild(list);
+}
+
+function upRow(p, k) {
+  const step = (p.steps || []).find((s) => !s.done);
+  const r = el('div', 'un-row');
+  r.style.setProperty('--i', k);
+  const tick = el('button', 'un-tick');
+  tick.type = 'button';
+  tick.setAttribute('aria-label', `Mark "${p.next_step}" done`);
+  tick.innerHTML = glyphSvg('check');
+  tick.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!step || r.classList.contains('ticking')) return;
+    r.classList.add('ticking');
+    // Let the check land before the list redraws with the project's next step.
+    setTimeout(() => steps(p.id, 'PATCH', `/${step.id}`, { done: true }), 480);
+  });
+  r.appendChild(tick);
+  r.appendChild(badgedIcon(p, 'xs'));
+  const text = el('span', 'un-text');
+  if (p.priority === 1) text.appendChild(el('span', 'star', '★'));
+  text.appendChild(document.createTextNode(p.next_step));
+  if (p.waiting_on) text.appendChild(el('span', 'wait', ` (waiting on ${p.waiting_on})`));
+  r.appendChild(text);
+  r.appendChild(el('span', 'un-proj', p.name));
+  r.addEventListener('click', () => openDrawer(p.id));
+  return r;
 }
 
 // ------------------------------------------------------------------ queue + board
@@ -1086,13 +1249,38 @@ function wire() {
   $('#newBtn').addEventListener('click', newProject);
   $('#scrim').addEventListener('click', closeDrawer);
   $('#viewSeg').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) setView(b.dataset.view); });
-  $('#sort').addEventListener('change', (e) => { state.filters.sort = e.target.value; render(); });
-  $('#showArchived').addEventListener('change', (e) => { state.filters.archived = e.target.checked; load(); });
-  let t; $('#search').addEventListener('input', (e) => { clearTimeout(t); t = setTimeout(() => { state.filters.q = e.target.value; render(); }, 120); });
+  $('#showArchived').addEventListener('change', (e) => { state.filters.archived = e.target.checked; renderFilterMenu(); load(); });
+  $('#filterBtn').addEventListener('click', (e) => { e.stopPropagation(); toggleFilterMenu(); });
+  $('#filterMenu').addEventListener('click', (e) => e.stopPropagation());
+  document.addEventListener('click', () => toggleFilterMenu(false));
+  $('#summary').addEventListener('click', (e) => {
+    const a = e.target.closest('[data-go]'); if (!a) return;
+    e.preventDefault();
+    if (a.dataset.go === 'stalled') { setView('tiles'); $('#band-stalled')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+    else setView(a.dataset.go);
+  });
+
+  const search = $('#search');
+  let t;
+  search.addEventListener('input', () => {
+    state.jumpIndex = 0; renderJump();
+    clearTimeout(t); t = setTimeout(() => { state.filters.q = search.value; render(); }, 120);
+  });
+  search.addEventListener('focus', renderJump);
+  search.addEventListener('blur', () => setTimeout(() => { $('#jump').hidden = true; }, 120));
+  search.addEventListener('keydown', (e) => {
+    const n = (state.jumpHits || []).length;
+    if (e.key === 'ArrowDown' && n) { e.preventDefault(); state.jumpIndex = (state.jumpIndex + 1) % n; renderJump(); }
+    else if (e.key === 'ArrowUp' && n) { e.preventDefault(); state.jumpIndex = (state.jumpIndex - 1 + n) % n; renderJump(); }
+    else if (e.key === 'Enter' && n && !$('#jump').hidden) { e.preventDefault(); jumpTo(state.jumpHits[state.jumpIndex || 0]); }
+    else if (e.key === 'Escape') { e.stopPropagation(); search.value = ''; state.filters.q = ''; $('#jump').hidden = true; search.blur(); render(); }
+  });
+
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && state.openId) closeDrawer();
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); search.focus(); search.select(); return; }
+    if (e.key === 'Escape') { toggleFilterMenu(false); if (state.openId) closeDrawer(); }
     const typing = ['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName) || document.activeElement.isContentEditable;
-    if (e.key === '/' && !typing) { e.preventDefault(); $('#search').focus(); }
+    if (e.key === '/' && !typing) { e.preventDefault(); search.focus(); }
   });
   try { const v = localStorage.getItem('mc.view'); if (v) setView(v); } catch { /* fine */ }
   // The /sync-dashboard skill links straight here.

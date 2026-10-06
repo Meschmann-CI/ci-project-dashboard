@@ -334,6 +334,20 @@ test('the done log lists completed steps newest first with their project, and fo
   assert.deepStrictEqual(db.listDone().filter((r) => r.project_id === p.id).map((r) => r.text), ['first']);
 });
 
+test('the roll-up keeps each attributed session time from the last 30 days, for the activity strip', () => {
+  const now = Date.parse('2026-10-06T12:00:00Z');
+  const p = { id: 1, markers: ['tile-app'] };
+  const row = (end, strong) => ({ session_end: end, first_prompt: null, hits: { 'tile-app': { strong, weak: 0, last_ts: end } } });
+  const out = scan.rollUpClaude([p], [
+    row('2026-10-05T10:00:00Z', 30),
+    row('2026-09-20T10:00:00Z', 30),
+    row('2026-08-01T10:00:00Z', 30),   // older than 30 days: counted, not drawn
+    row('2026-10-04T10:00:00Z', 1),    // too little to count as work at all
+  ], now).get(1);
+  assert.strictEqual(out.sessions, 3);
+  assert.deepStrictEqual(out.recent_sessions, ['2026-09-20T10:00:00Z', '2026-10-05T10:00:00Z']);
+});
+
 console.log('\nicons');
 
 test('the glyphs the server accepts are exactly the ones the browser can draw', () => {
