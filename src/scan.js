@@ -9,6 +9,7 @@ const path = require('node:path');
 const os = require('node:os');
 const readline = require('node:readline');
 const db = require('./db');
+const suggest = require('./suggest');
 
 const FS_IGNORE = new Set(['node_modules', '.git', 'data', 'uploads', '.next', 'dist', 'build', '.cache']);
 const FS_MAX_DEPTH = 6;
@@ -33,6 +34,7 @@ const MIN_SHARE = 0.25;     // and the share of the session it must represent
 const STRONG_WEIGHT = 3;    // a tool call counts for three mentions in prose
 
 const BIG_LINE = 1_000_000;
+const RECENT_COMMITS = 60;
 
 // ---------------------------------------------------------------- job state
 
@@ -89,14 +91,21 @@ async function scanGit(absPath) {
     return { is_repo: false, inside_repo: top ? top.replace(/\\/g, '/') : null };
   }
 
-  const [logOut, remote, aheadOut, modifiedOut, untrackedOut, branch] = await Promise.all([
+  const [logOut, remote, aheadOut, modifiedOut, untrackedOut, branch, recentOut] = await Promise.all([
     git(absPath, ['log', '-1', '--format=%cI%x1f%s%x1f%an']),
     git(absPath, ['remote', 'get-url', 'origin']),
     git(absPath, ['rev-list', '--count', '@{u}..HEAD']),
     git(absPath, ['status', '--porcelain', '--untracked-files=no']),
     git(absPath, ['ls-files', '--others', '--exclude-standard']),
     git(absPath, ['rev-parse', '--abbrev-ref', 'HEAD']),
+    // The last month of commits, for matching against open steps and for the
+    // Claude sync to read. Capped so a busy repo cannot bloat the activity row.
+    git(absPath, ['log', `-${RECENT_COMMITS}`, '--since=30.days', '--format=%H%x1f%cI%x1f%s']),
   ]);
+  const recent = (recentOut || '').split('\n').filter((l) => l.trim()).map((l) => {
+    const [hash, at, subj] = l.split('\x1f');
+    return { hash, at, subject: subj || '' };
+  });
 
   const [lastAt, subject, author] = (logOut || '').trim().split('\x1f');
   const countLines = (s) => (s || '').split('\n').filter((l) => l.trim()).length;
@@ -113,6 +122,7 @@ async function scanGit(absPath) {
     has_upstream: aheadOut !== null,
     modified: countLines(modifiedOut),
     untracked: countLines(untrackedOut),
+    recent,
   };
 }
 
@@ -383,6 +393,12 @@ async function runScan() {
       db.setSetting('last_scan_summary', JSON.stringify(summary));
     });
 
+    // ---- suggestions, from the activity just written. A failure here must
+    // not fail the scan, whose results are already saved.
+    try { summary.suggested = suggest.offerFromScan(); }
+    catch (e) { summary.suggest_error = e && e.message ? e.message : String(e); }
+    db.setSetting('last_scan_summary', JSON.stringify(summary));
+
     state.summary = summary;
     state.phase = 'idle';
   } catch (e) {
@@ -406,13 +422,10 @@ function attributes(s, w, sessionScore) {
   return sessionScore > 0 && mine / sessionScore >= MIN_SHARE;
 }
 
-// Aggregate per-marker hits into a per-project verdict.
-function rollUpClaude(projects, cacheRows) {
-  const out = new Map();
-
-  // Per-project totals for each transcript, plus the whole session's total, so
-  // the dominance test has a denominator.
-  const perFile = cacheRows.map((r) => {
+// Per-project totals for each transcript, plus the whole session's total, so
+// the dominance test has a denominator.
+function perFileScores(projects, cacheRows) {
+  return cacheRows.map((r) => {
     const byProject = new Map();
     let sessionScore = 0;
     for (const p of projects) {
@@ -433,6 +446,26 @@ function rollUpClaude(projects, cacheRows) {
     }
     return { row: r, byProject, sessionScore };
   });
+}
+
+// Which sessions count as work on each project, by the same test the activity
+// signal uses. Map of project id to cache rows.
+function sessionsByProject(projects, cacheRows) {
+  const out = new Map();
+  for (const { row: r, byProject, sessionScore } of perFileScores(projects, cacheRows)) {
+    for (const [pid, hit] of byProject) {
+      if (!attributes(hit.s, hit.w, sessionScore)) continue;
+      if (!out.has(pid)) out.set(pid, []);
+      out.get(pid).push(r);
+    }
+  }
+  return out;
+}
+
+// Aggregate per-marker hits into a per-project verdict.
+function rollUpClaude(projects, cacheRows) {
+  const out = new Map();
+  const perFile = perFileScores(projects, cacheRows);
 
   for (const p of projects) {
     if (!p.markers.length) continue;
@@ -461,4 +494,4 @@ function rollUpClaude(projects, cacheRows) {
   return out;
 }
 
-module.exports = { runScan, status, state, scanGit, scanFs, scanTranscript, rollUpClaude, attributes, classify, findTranscripts, samePath, STRONG_VOLUME, MIN_SCORE, MIN_SHARE, STRONG_WEIGHT };
+module.exports = { runScan, status, state, scanGit, scanFs, scanTranscript, rollUpClaude, sessionsByProject, attributes, classify, findTranscripts, claudeProjectsDir, samePath, STRONG_VOLUME, MIN_SCORE, MIN_SHARE, STRONG_WEIGHT };

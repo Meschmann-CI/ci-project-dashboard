@@ -67,6 +67,9 @@
 }
 
 * { box-sizing: border-box; }
+/* Any class that sets display (.banner, .count) would otherwise beat the
+   hidden attribute and leave an empty box on screen. */
+[hidden] { display: none !important; }
 html { scroll-behavior: smooth; }
 body {
   margin: 0;
@@ -684,3 +687,74 @@ main { max-width: 1500px; margin: 0 auto; padding: 0 36px 80px; }
 .donerow .proj { font-size: 12px; color: var(--muted); margin-top: 1px; }
 .donerow .time { font-size: 12px; color: var(--faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
 @media (max-width: 760px) { .done-stats { grid-template-columns: repeat(2, 1fr); } .strip { grid-template-columns: repeat(7, 1fr); } }
+
+/* ---------- suggested updates ---------- */
+/* Black structure, orange for "look at this", green only once applied. Same
+   rules as the rest of the board. */
+.sug-banner { background: var(--card); border-color: var(--line-2); }
+.sug-head {
+  display: flex; gap: 20px; align-items: flex-end; justify-content: space-between; flex-wrap: wrap;
+  max-width: 900px; margin-bottom: 18px;
+}
+.sug-intro { max-width: 560px; }
+.sug-intro h2 { margin: 0; font-family: var(--display); font-weight: 700; font-size: 26px; letter-spacing: -.02em; }
+.sug-intro p { margin: 6px 0 0; color: var(--ink-2); font-size: 14px; line-height: 1.45; }
+.sug-intro .sug-meta { color: var(--muted); font-size: 13px; }
+.sug-intro code { font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 12.5px; background: var(--paper-2); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; color: var(--ink); }
+.sug-bar { display: flex; gap: 8px; flex-wrap: wrap; }
+.sug-bar .pill:disabled { opacity: .45; cursor: default; transform: none; box-shadow: none; }
+
+.suggested { display: grid; gap: 14px; }
+.sug-group {
+  max-width: 900px; background: var(--card); border: 1px solid var(--line); border-radius: var(--r);
+  box-shadow: var(--shadow); overflow: hidden;
+  animation: rise .4s both; animation-delay: calc(var(--i, 0) * 40ms);
+}
+.sug-ghead {
+  display: flex; align-items: center; gap: 10px; padding: 12px 16px;
+  background: color-mix(in oklab, var(--c) 11%, var(--card)); border-bottom: 1px solid var(--line);
+}
+.sug-ghead .face { width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center; font-size: 17px; background: color-mix(in oklab, var(--c) 35%, var(--card)); }
+.sug-pname { border: 0; background: none; padding: 0; color: var(--ink); font-family: var(--display); font-weight: 700; font-size: 17px; letter-spacing: -.01em; cursor: pointer; }
+.sug-pname:hover { text-decoration: underline; }
+
+.sug {
+  display: grid; grid-template-columns: 22px 1fr auto; gap: 12px; align-items: start;
+  padding: 12px 16px; border-bottom: 1px solid var(--line); cursor: pointer;
+  transition: background .12s;
+}
+.sug:last-child { border-bottom: 0; }
+.sug:hover { background: var(--paper-2); }
+.sug.on { background: color-mix(in oklab, var(--accent) 9%, var(--card)); }
+.sug-cb { width: 18px; height: 18px; margin: 2px 0 0; accent-color: var(--ink); cursor: pointer; }
+.sug-line { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.sverb {
+  flex: none; font-size: 11px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase;
+  padding: 2px 8px; border-radius: 999px; background: var(--paper-2); color: var(--ink-2); border: 1px solid var(--line);
+}
+.sverb.complete_step { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.sverb.set_stage { background: transparent; border-color: var(--line-2); }
+.stext { font-weight: 650; color: var(--ink); line-height: 1.35; word-break: break-word; }
+.stext.editable { border-bottom: 1.5px dashed var(--line-2); outline: none; cursor: text; }
+.stext.editable:focus { border-bottom-color: var(--accent); }
+.sdate { font-size: 12px; font-weight: 700; color: var(--muted); white-space: nowrap; }
+.sreason { margin-top: 4px; font-size: 13px; color: var(--ink-2); }
+.sevid { margin-top: 4px; font-size: 12px; color: var(--muted); display: flex; gap: 8px; flex-wrap: wrap; word-break: break-word; }
+.ssrc { font-weight: 700; color: var(--faint); white-space: nowrap; }
+.sx {
+  border: 0; background: transparent; color: var(--faint); font-size: 20px; line-height: 1;
+  width: 28px; height: 28px; border-radius: 8px; cursor: pointer;
+}
+.sx:hover { background: var(--paper-2); color: var(--ink); }
+.sug-link {
+  margin-top: 10px; border: 1.5px solid color-mix(in oklab, var(--accent) 45%, transparent);
+  background: color-mix(in oklab, var(--accent) 8%, var(--card)); color: var(--accent-text);
+  border-radius: 999px; padding: 7px 14px; font-weight: 700; font-size: 13px; cursor: pointer;
+}
+@media (max-width: 760px) {
+  .sug-head { align-items: stretch; }
+  .sug { grid-template-columns: 22px 1fr 28px; padding: 12px; }
+}
+/* Five view tabs no longer fit a phone width; let the bar scroll rather than
+   push the page sideways. */
+@media (max-width: 760px) { .seg { max-width: 100%; overflow-x: auto; scrollbar-width: none; } .seg button { flex: none; } }

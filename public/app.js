@@ -5,6 +5,10 @@ const state = {
   projects: [],
   queue: [],
   done: [],          // every completed step, newest first, from /api/done
+  suggestions: [],   // open suggested updates, from /api/suggestions
+  lastSync: null,    // when /sync-dashboard last posted
+  sugSel: new Set(), // suggestion ids ticked for applying
+  sugEdits: {},      // { id: { text } } rewording typed before applying
   meta: { stages: [], kinds: [], kind_info: [], colors: [], rules: [], owner_name: '' },
   scan: {},
   view: 'tiles',
@@ -103,14 +107,16 @@ async function loadMeta() {
 }
 
 async function load() {
-  const [data, done] = await Promise.all([
+  const [data, done, sug] = await Promise.all([
     api('/api/projects' + (state.filters.archived ? '?archived=1' : '')),
-    // The done log is a nicety. If the server is an older build without this
-    // route, the board must still load rather than fail with it.
+    // The done log and suggestions are niceties. If the server is an older
+    // build without these routes, the board must still load rather than fail.
     api('/api/done').catch(() => ({ items: [] })),
+    api('/api/suggestions').catch(() => ({ items: [], last_claude_sync_at: null })),
   ]);
   state.projects = data.projects; state.queue = data.queue; state.scan = data.scan;
   state.done = done.items || [];
+  state.suggestions = sug.items || []; state.lastSync = sug.last_claude_sync_at || null;
   render();
 }
 
@@ -118,7 +124,11 @@ async function pollScan() {
   state.scan = await api('/api/scan/status');
   renderScan();
   if (state.scan.running) state.pollTimer = setTimeout(pollScan, 700);
-  else { clearTimeout(state.pollTimer); state.pollTimer = null; await load(); }
+  else {
+    clearTimeout(state.pollTimer); state.pollTimer = null; await load();
+    const n = state.scan.summary?.suggested || 0;
+    if (n) toast(`Scan found ${n} new suggested update${n === 1 ? '' : 's'}`);
+  }
 }
 
 // ------------------------------------------------------------------ render
@@ -134,6 +144,8 @@ function render() {
   const qc = $('#queueCount'); qc.textContent = n; qc.className = 'count' + (n ? '' : ' zero');
   renderDone();
   $('#doneCount').textContent = doneStats(state.done).thisWeek;
+  renderSuggested();
+  const sc = $('#sugCount'); sc.textContent = state.suggestions.length; sc.hidden = !state.suggestions.length;
   if (state.openId && state.detail && state.detail.id === state.openId) renderDrawer(state.detail);
 }
 
@@ -159,7 +171,8 @@ function renderHero() {
     (stalled ? `<span class="need">${stalled} need${stalled === 1 ? 's' : ''} a next step</span>` : `<b>0</b> stalled`) +
     ` · <b>${parked}</b> live &amp; parked · ` +
     (need ? `<span class="need">${need} need${need === 1 ? 's' : ''} you</span>` : `<b style="color:var(--ok)">nothing needs you</b>`) +
-    (ds.thisWeek ? ` · <b class="good">${ds.thisWeek}</b> done this week` : '');
+    (ds.thisWeek ? ` · <b class="good">${ds.thisWeek}</b> done this week` : '') +
+    (state.suggestions.length ? ` · <span class="need">${state.suggestions.length} suggested update${state.suggestions.length === 1 ? '' : 's'}</span>` : '');
 }
 
 function renderScan() {
@@ -170,7 +183,12 @@ function renderScan() {
     const pct = s.bytesTotal ? Math.round((s.bytesDone / s.bytesTotal) * 100) : 0;
     txt.textContent = s.phase === 'transcripts' ? `reading transcripts ${pct}%` : `scanning ${s.phase}…`;
   } else if (s.error) txt.textContent = `scan failed`;
-  else if (s.lastScanAt) txt.textContent = `scanned ${ago(s.lastScanAt)}`;
+  else if (s.lastScanAt) {
+    // Say what the last scan produced, so a scan that found something does not
+    // look the same as one that found nothing.
+    const found = s.lastSummary?.suggested || 0;
+    txt.textContent = `scanned ${ago(s.lastScanAt)}` + (found && state.suggestions.length ? ` · ${found} new suggested` : '');
+  }
   else txt.textContent = 'not scanned yet';
 }
 
@@ -271,6 +289,17 @@ function renderTiles(visible) {
     banner.appendChild(el('span', 'go', 'See all →'));
     banner.onclick = () => setView('queue');
   } else banner.hidden = true;
+
+  const sb = $('#sugBanner');
+  const ns = state.suggestions.length;
+  if (ns) {
+    sb.hidden = false; sb.innerHTML = '';
+    sb.appendChild(el('span', 'lead', `✨ ${ns} suggested update${ns === 1 ? '' : 's'}`));
+    const projs = [...new Set(state.suggestions.map((s) => s.project_name))];
+    sb.appendChild(el('span', null, `from work done outside the app: ${projs.slice(0, 3).join(', ')}${projs.length > 3 ? ` and ${projs.length - 3} more` : ''}`));
+    sb.appendChild(el('span', 'go', 'Review →'));
+    sb.onclick = () => setView('suggested');
+  } else sb.hidden = true;
 }
 
 function tile(p, i, compact = false) {
@@ -401,6 +430,7 @@ function setView(v) {
   document.querySelectorAll('#viewSeg button').forEach((b) => b.classList.toggle('on', b.dataset.view === v));
   $('#viewTiles').hidden = v !== 'tiles'; $('#viewQueue').hidden = v !== 'queue'; $('#viewBoard').hidden = v !== 'board';
   $('#viewDone').hidden = v !== 'done';
+  $('#viewSuggested').hidden = v !== 'suggested';
   try { localStorage.setItem('mc.view', v); } catch { /* fine */ }
 }
 
@@ -451,6 +481,13 @@ function renderDrawer(p) {
   const openN = (p.steps || []).filter((s) => !s.done).length;
   const gNow = group(body, '🎯 Up next', openN ? `${openN} step${openN === 1 ? '' : 's'} queued · top one is the next step` : 'nothing queued');
   gNow.appendChild(checklist(p));
+
+  const mine = state.suggestions.filter((s) => s.project_id === p.id).length;
+  if (mine) {
+    const link = el('button', 'sug-link', `✨ ${mine} suggested update${mine === 1 ? '' : 's'} for this project · Review`);
+    link.addEventListener('click', () => { closeDrawer(); setView('suggested'); });
+    gNow.appendChild(link);
+  }
 
   const stageF = el('div', 'field'); stageF.appendChild(el('label', null, 'Stage'));
   const steps = el('div', 'steps');
@@ -812,6 +849,186 @@ function renderDone() {
   box.appendChild(list);
 }
 
+// ------------------------------------------------------------------ suggested
+
+const SUG_VERB = { complete_step: 'Tick off', add_step: 'New step', set_stage: 'Stage', add_log: 'History', set_waiting: 'Waiting on' };
+const SUG_SOURCE = { claude: '✨ Claude sync', scan: '📡 Scan' };
+const fmtDate = (iso) => new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+
+function suggestionsVisible() {
+  const { q, kind } = state.filters; const needle = q.trim().toLowerCase();
+  const kindOf = new Map(state.projects.map((p) => [p.id, p.kind]));
+  return state.suggestions.filter((s) => {
+    if (kind && kindOf.get(s.project_id) !== kind) return false;
+    if (needle && !`${s.project_name} ${JSON.stringify(s.payload)} ${s.reason}`.toLowerCase().includes(needle)) return false;
+    return true;
+  });
+}
+
+function renderSuggested() {
+  const box = $('#suggested'); box.innerHTML = '';
+  // Forget ticks and rewording for suggestions that are gone.
+  const live = new Set(state.suggestions.map((s) => s.id));
+  for (const id of [...state.sugSel]) if (!live.has(id)) state.sugSel.delete(id);
+  for (const id of Object.keys(state.sugEdits)) if (!live.has(Number(id))) delete state.sugEdits[id];
+
+  const items = suggestionsVisible();
+
+  const head = el('div', 'sug-head');
+  const intro = el('div', 'sug-intro');
+  intro.appendChild(el('h2', null, 'Suggested updates'));
+  intro.appendChild(el('p', null, 'Changes your commits, Claude sessions and memory notes say have already happened. Tick the ones that are right and apply them. Nothing changes until you do.'));
+  const meta = el('p', 'sug-meta');
+  meta.appendChild(document.createTextNode(state.lastSync ? `Claude last read your sessions ${ago(state.lastSync)}. ` : 'Claude has not read your sessions yet. '));
+  meta.appendChild(document.createTextNode('For a fresh read, type '));
+  meta.appendChild(el('code', null, '/sync-dashboard'));
+  meta.appendChild(document.createTextNode(' in any Claude session.'));
+  intro.appendChild(meta);
+  head.appendChild(intro);
+
+  const bar = el('div', 'sug-bar');
+  const all = el('button', 'pill pill-ghost sug-all');
+  all.disabled = !items.length;
+  all.addEventListener('click', () => {
+    const allOn = items.every((s) => state.sugSel.has(s.id));
+    for (const s of items) { if (allOn) state.sugSel.delete(s.id); else state.sugSel.add(s.id); }
+    syncSugTicks();
+  });
+  const dis = el('button', 'pill sug-dismiss');
+  dis.title = 'Dismissed suggestions never come back';
+  dis.addEventListener('click', () => dismissSuggestions([...state.sugSel]));
+  const app = el('button', 'pill pill-solid sug-apply');
+  app.addEventListener('click', applySuggestions);
+  bar.append(all, dis, app);
+  head.appendChild(bar);
+  box.appendChild(head);
+  syncSugTicks();
+
+  if (!items.length) {
+    const e = el('div', 'empty', state.suggestions.length ? 'Nothing matches the current filter.' : 'Nothing to review.');
+    if (!state.suggestions.length) e.appendChild(el('small', null, 'Each scan adds the obvious ones by itself. For the rest, type /sync-dashboard in a Claude session.'));
+    box.appendChild(e); return;
+  }
+
+  // One card per project, in the order the server sent (priority, then name).
+  const groups = new Map();
+  for (const s of items) { if (!groups.has(s.project_id)) groups.set(s.project_id, []); groups.get(s.project_id).push(s); }
+  let i = 0;
+  for (const [pid, list] of groups) {
+    const first = list[0];
+    const g = el('section', 'sug-group'); g.dataset.color = first.color || 'cocoa'; g.style.setProperty('--i', i++);
+    const gh = el('div', 'sug-ghead');
+    gh.appendChild(el('span', 'face', first.icon || '•'));
+    const nm = el('button', 'sug-pname', first.project_name); nm.title = 'Open project';
+    nm.addEventListener('click', () => openDrawer(pid));
+    gh.appendChild(nm);
+    const st = el('span', 'tag stage', STAGE_LABEL[first.project_stage] || first.project_stage); st.dataset.stage = first.project_stage;
+    gh.appendChild(st);
+    g.appendChild(gh);
+    for (const s of list) g.appendChild(sugRow(s));
+    box.appendChild(g);
+  }
+  syncSugTicks();
+}
+
+// Ticking updates the rows and buttons in place. Re-rendering the list on
+// every tick replays its entrance animation and jumps the scroll position, so
+// the next click lands on the wrong row.
+function syncSugTicks() {
+  const box = $('#suggested'); if (!box) return;
+  const visible = suggestionsVisible();
+  const n = state.sugSel.size;
+  for (const r of box.querySelectorAll('.sug')) {
+    const on = state.sugSel.has(Number(r.dataset.id));
+    r.classList.toggle('on', on);
+    const cb = r.querySelector('.sug-cb'); if (cb) cb.checked = on;
+  }
+  const all = box.querySelector('.sug-all');
+  if (all) all.textContent = visible.length && visible.every((s) => state.sugSel.has(s.id)) ? 'Clear ticks' : 'Tick all';
+  const dis = box.querySelector('.sug-dismiss');
+  if (dis) { dis.textContent = n ? `Dismiss ${n}` : 'Dismiss'; dis.disabled = !n; }
+  const app = box.querySelector('.sug-apply');
+  if (app) { app.textContent = n ? `Apply ${n} selected` : 'Apply selected'; app.disabled = !n; }
+}
+
+function sugRow(s) {
+  const on = state.sugSel.has(s.id);
+  const pl = s.payload || {};
+  const r = el('div', 'sug' + (on ? ' on' : ''));
+  r.dataset.id = s.id;
+  const toggle = () => { if (state.sugSel.has(s.id)) state.sugSel.delete(s.id); else state.sugSel.add(s.id); syncSugTicks(); };
+
+  const cb = document.createElement('input'); cb.type = 'checkbox'; cb.className = 'sug-cb'; cb.checked = on;
+  cb.setAttribute('aria-label', 'Select this suggestion');
+  cb.addEventListener('change', toggle);
+  r.appendChild(cb);
+
+  const main = el('div', 'sug-main');
+  const line = el('div', 'sug-line');
+  line.appendChild(el('span', `sverb ${s.type}`, SUG_VERB[s.type] || s.type));
+
+  if (s.type === 'add_step' || s.type === 'add_log') {
+    // Wording is editable before applying; the edit rides along with the apply.
+    const t = el('span', 'stext editable', state.sugEdits[s.id]?.text ?? pl.text);
+    t.contentEditable = 'true'; t.spellcheck = true; t.title = 'Click to reword before applying';
+    t.addEventListener('input', () => { state.sugEdits[s.id] = { text: t.textContent.trim() }; });
+    t.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); t.blur(); } });
+    line.appendChild(t);
+    if (pl.at) line.appendChild(el('span', 'sdate', fmtDate(pl.at)));
+  } else if (s.type === 'complete_step') {
+    line.appendChild(el('span', 'stext', pl.step_text));
+    if (pl.done_at) line.appendChild(el('span', 'sdate', `done ${fmtDate(pl.done_at)}`));
+  } else if (s.type === 'set_stage') {
+    line.appendChild(el('span', 'stext', `${STAGE_LABEL[pl.from] || pl.from} → ${STAGE_LABEL[pl.stage] || pl.stage}`));
+  } else if (s.type === 'set_waiting') {
+    line.appendChild(el('span', 'stext', pl.waiting_on || 'Nobody (clear it)'));
+  }
+  main.appendChild(line);
+  if (s.reason) main.appendChild(el('div', 'sreason', s.reason));
+  const ev = el('div', 'sevid');
+  ev.appendChild(el('span', 'ssrc', SUG_SOURCE[s.source] || s.source));
+  if (s.evidence) ev.appendChild(el('span', null, s.evidence));
+  main.appendChild(ev);
+  r.appendChild(main);
+
+  const x = el('button', 'sx', '×'); x.title = 'Dismiss. It will not be suggested again.'; x.setAttribute('aria-label', 'Dismiss');
+  x.addEventListener('click', () => dismissSuggestions([s.id]));
+  r.appendChild(x);
+
+  // Clicking anywhere on the row ticks it, except where the click means something else.
+  r.addEventListener('click', (e) => {
+    if (e.target.closest('input, button, [contenteditable=true]')) return;
+    toggle();
+  });
+  return r;
+}
+
+async function applySuggestions() {
+  const ids = [...state.sugSel]; if (!ids.length) return;
+  const edits = {};
+  for (const id of ids) if (state.sugEdits[id]?.text) edits[id] = state.sugEdits[id];
+  try {
+    const { results } = await api('/api/suggestions/apply', { method: 'POST', body: { ids, edits } });
+    const ok = results.filter((r) => r.ok).length;
+    const bad = results.filter((r) => !r.ok);
+    state.sugSel.clear();
+    await load();
+    toast(bad.length
+      ? `Applied ${ok}. ${bad.length} skipped: ${bad[0].error}`
+      : `Applied ${ok} update${ok === 1 ? '' : 's'}`, bad.length && !ok);
+  } catch (e) { toast(e.message, true); }
+}
+
+async function dismissSuggestions(ids) {
+  if (!ids.length) return;
+  try {
+    await api('/api/suggestions/dismiss', { method: 'POST', body: { ids } });
+    for (const id of ids) state.sugSel.delete(id);
+    await load();
+    toast(`Dismissed ${ids.length}`);
+  } catch (e) { toast(e.message, true); }
+}
+
 // ------------------------------------------------------------------ misc
 
 async function newProject() {
@@ -844,6 +1061,8 @@ function wire() {
     if (e.key === '/' && !typing) { e.preventDefault(); $('#search').focus(); }
   });
   try { const v = localStorage.getItem('mc.view'); if (v) setView(v); } catch { /* fine */ }
+  // The /sync-dashboard skill links straight here.
+  if (location.hash === '#suggested') setView('suggested');
 }
 
 (async function main() {

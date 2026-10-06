@@ -136,6 +136,24 @@ function migrate(d) {
       created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
     );
     CREATE INDEX IF NOT EXISTS steps_project ON steps(project_id, done, sort);
+
+    -- Proposed changes from outside evidence (scan rules, or a Claude sync).
+    -- Nothing here touches a project until Matt applies it. fingerprint is
+    -- unique so a dismissed or applied suggestion is never offered again.
+    CREATE TABLE IF NOT EXISTS suggestions (
+      id          INTEGER PRIMARY KEY,
+      project_id  INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      type        TEXT NOT NULL,
+      payload     TEXT NOT NULL DEFAULT '{}',
+      reason      TEXT NOT NULL DEFAULT '',
+      evidence    TEXT NOT NULL DEFAULT '',
+      source      TEXT NOT NULL,
+      fingerprint TEXT NOT NULL UNIQUE,
+      status      TEXT NOT NULL DEFAULT 'open',
+      created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+      resolved_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS suggestions_status ON suggestions(status, project_id);
   `);
 
   // One-time: turn the old single next_step text into the first checklist row.
@@ -183,11 +201,16 @@ const today = () => new Date().toISOString().slice(0, 10);
 function rows(sql, params = []) { return open().prepare(sql).all(...params); }
 function row(sql, params = []) { return open().prepare(sql).get(...params); }
 function run(sql, params = []) { return open().prepare(sql).run(...params); }
+// Re-entrant: a tx inside a tx joins the outer one, so applying a suggestion can
+// wrap updateStep (which opens its own) and still roll back as a unit.
+let txDepth = 0;
 function tx(fn) {
+  if (txDepth > 0) return fn();
   const d = open();
   d.exec('BEGIN');
-  try { const r = fn(); d.exec('COMMIT'); return r; }
-  catch (e) { try { d.exec('ROLLBACK'); } catch { /* already rolled back */ } throw e; }
+  txDepth += 1;
+  try { const r = fn(); txDepth -= 1; d.exec('COMMIT'); return r; }
+  catch (e) { txDepth = 0; try { d.exec('ROLLBACK'); } catch { /* already rolled back */ } throw e; }
 }
 
 function getSetting(key, fallback = null) {
@@ -315,18 +338,25 @@ function syncNextStep(projectId) {
     [first ? first.text : '', projectId]);
 }
 
-function addStep(projectId, text, { log = true } = {}) {
+// `via` tags a history line with where the change came from, e.g. an applied
+// suggestion, so the log shows which edits Matt made by hand.
+const tagged = (text, via) => (via ? `${text} · ${via}` : text);
+
+function addStep(projectId, text, { log = true, via = '' } = {}) {
   const t = String(text || '').trim().slice(0, 500);
   if (!t) throw new Error('step text is required');
   if (!row('SELECT 1 FROM projects WHERE id = ?', [projectId])) throw new Error('no such project');
   const next = row('SELECT COALESCE(MAX(sort), -1) + 1 AS n FROM steps WHERE project_id = ? AND done = 0', [projectId]).n;
   const info = run('INSERT INTO steps(project_id, text, sort) VALUES(?,?,?)', [projectId, t, next]);
-  if (log) addLog(projectId, 'step', `Added: ${t}`);
+  if (log) addLog(projectId, 'step', tagged(`Added: ${t}`, via));
   syncNextStep(projectId);
   return row('SELECT * FROM steps WHERE id = ?', [Number(info.lastInsertRowid)]);
 }
 
-function updateStep(projectId, stepId, patch) {
+// doneAt backdates a completion to when the work actually happened, so the
+// Done view credits the right day. Only applied suggestions pass it; the HTTP
+// PATCH route does not.
+function updateStep(projectId, stepId, patch, { via = '', doneAt = null } = {}) {
   const s = row('SELECT * FROM steps WHERE id = ? AND project_id = ?', [stepId, projectId]);
   if (!s) return null;
   return tx(() => {
@@ -338,9 +368,10 @@ function updateStep(projectId, stepId, patch) {
     if ('done' in patch) {
       const done = patch.done ? 1 : 0;
       if (done !== s.done) {
-        run('UPDATE steps SET done = ?, done_at = ? WHERE id = ?', [done, done ? nowIso() : null, stepId]);
+        run('UPDATE steps SET done = ?, done_at = ? WHERE id = ?', [done, done ? (doneAt || nowIso()) : null, stepId]);
         // Completing a step is the one event this whole tool exists to record.
-        addLog(projectId, done ? 'done' : 'step', `${done ? 'Completed' : 'Reopened'}: ${'text' in patch ? patch.text : s.text}`);
+        addLog(projectId, done ? 'done' : 'step',
+          tagged(`${done ? 'Completed' : 'Reopened'}: ${'text' in patch ? patch.text : s.text}`, via), done ? doneAt : null);
         if (!done) {
           // Reopened steps go to the bottom of the open list, not the top.
           const n = row('SELECT COALESCE(MAX(sort), -1) + 1 AS n FROM steps WHERE project_id = ? AND done = 0', [projectId]).n;
@@ -429,7 +460,7 @@ function createProject(input) {
   return getProject(id);
 }
 
-function updateProject(id, patch) {
+function updateProject(id, patch, { via = '' } = {}) {
   const before = getProject(id);
   if (!before) return null;
 
@@ -476,7 +507,7 @@ function updateProject(id, patch) {
       sets.push("updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')");
       run(`UPDATE projects SET ${sets.join(', ')} WHERE id = ?`, [...vals, id]);
     }
-    for (const [kind, text] of logs) addLog(id, kind, text);
+    for (const [kind, text] of logs) addLog(id, kind, tagged(text, via));
     return getProject(id);
   });
 }
@@ -491,8 +522,11 @@ function addMarker(projectId, marker) {
   run('INSERT OR IGNORE INTO markers(project_id, marker) VALUES(?,?)', [projectId, m]);
 }
 
-function addLog(projectId, kind, text) {
-  run('INSERT INTO log(project_id, kind, text) VALUES(?,?,?)', [projectId, kind, String(text).slice(0, 2000)]);
+// `at` backdates the entry (an applied suggestion recording work from last
+// Tuesday); omitted, it is now.
+function addLog(projectId, kind, text, at = null) {
+  run('INSERT INTO log(project_id, kind, text, at) VALUES(?,?,?,COALESCE(?, strftime(\'%Y-%m-%dT%H:%M:%fZ\',\'now\')))',
+    [projectId, kind, String(text).slice(0, 2000), at]);
 }
 
 function setActivity(projectId, source, lastAt, detail) {

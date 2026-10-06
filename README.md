@@ -124,6 +124,25 @@ Warnings sort above chores because uncommitted work is a data-loss risk. `paused
 
 Muting matters more than it looks. A queue carrying a permanent false alarm is a queue you learn to ignore.
 
+## Suggested updates
+
+Most work happens in Claude sessions, not in this app, so the checklist and stages fall behind. The **Suggested** tab holds proposed changes drawn from that outside work. Each one shows the change, a one-line reason, and the evidence (a commit, a session date and quote, or a memory note). Tick the right ones and press **Apply selected**. Step and history wording can be edited before applying. Dismissed suggestions never come back. Nothing changes a project until it is applied, and every applied change is tagged in History as "suggested by Claude" or "suggested by scan".
+
+Five kinds: tick off a step, add a step, change stage, add a history entry, set or clear waiting-on. A completion is dated to when the work happened, so the Done view credits the right day.
+
+Two sources feed it:
+
+| source | when | what it can tell |
+|---|---|---|
+| **Scan rules** | every scan, free, automatic | an open step that a later commit plainly describes; an active project silent for 30+ days (pause it?); a paused or idea project with fresh commits or sessions (building again?) |
+| **Claude sync** | type `/sync-dashboard` in any Claude session | everything else: what a session finished, what it said comes next, stage changes, who you are waiting on |
+
+The scan rules are kept narrow on purpose. A list that is mostly wrong gets ignored, same as a queue with a permanent false alarm. Judgement is left to the Claude sync.
+
+**How the sync works.** `GET /api/suggestions/context` rescans, then returns each project's state plus digests of the sessions attributed to it since the last sync (what you typed, Claude's last message before each hand-back, commit messages), its recent commits, and any memory notes that changed. Digests are a few KB per session instead of the multi-MB transcript. The skill reads that, decides, and `POST /api/suggestions` with the as-of time, which moves the "since" mark forward. Pass a window to look further back: `/sync-dashboard 30d`.
+
+The skill lives at `~/.claude/skills/sync-dashboard/SKILL.md`. The copy in `claude-skill/` is the source of truth: if you change it, copy it back to that folder.
+
 ## Transcript markers
 
 Markers are distinctive substrings searched for in session transcripts, such as `ar-tracking-app` or `Fluxguard`. Edit them per project in the drawer.
@@ -143,7 +162,7 @@ Adding a marker forces a full re-read of the transcripts, since older ones were 
 
 ## Privacy
 
-Transcripts contain client material and occasionally PII. This app stores only per-project counts, timestamps, and one truncated first prompt per session. `data/dashboard.db` is gitignored and must stay on this machine.
+Transcripts contain client material and occasionally PII. This app stores only per-project counts, timestamps, and one truncated first prompt per session. The sync context builds session digests on request and does not store them; suggestions store only their own short text. `data/dashboard.db` is gitignored and must stay on this machine.
 
 If this is ever deployed for the team, disable the transcript scanner rather than removing it:
 
@@ -161,8 +180,12 @@ server.js          http server, API, scan job guard
 src/db.js          schema, migrations, data access
 src/scan.js        the three scanners, all async
 src/attention.js   the rules, as a pure function of (project, now)
+src/suggest.js     suggested updates: validate, store, apply, and the scan rules
+src/digest.js      a short readable digest of one session transcript
+src/sync.js        the context the /sync-dashboard skill reads
 src/seed.js        initial projects from the current workspace
-src/test.js        30 unit tests (rules, transcript weighting, checklist against a temp database)
+src/test.js        44 unit tests (rules, transcript weighting, checklist, suggestions, against a temp database)
+claude-skill/      source copy of the /sync-dashboard skill
 public/            the single-page front end
 data/dashboard.db  gitignored
 ```
@@ -175,7 +198,7 @@ Runs a syntax check on every file plus the rule and weighting tests. The rules a
 
 ## Notes
 
-- Binds to `127.0.0.1`. No auth, local only.
+- Binds to `127.0.0.1`. No auth, local only. Requests must carry a `localhost` or `127.0.0.1` Host header, and API writes must be `Content-Type: application/json`, so a web page in your browser cannot read session digests or post to the API.
 - The scan runs once at startup in the background and on demand from the header.
 - The workspace root is deliberately not a project. Its untracked files are expected noise and would sit in the queue forever.
 - Cowork sessions (Project Amplify) do not write to `~/.claude/projects`, so Amplify's only activity signal is file mtimes.

@@ -7,6 +7,8 @@ const path = require('node:path');
 const db = require('./src/db');
 const attention = require('./src/attention');
 const scan = require('./src/scan');
+const suggest = require('./src/suggest');
+const sync = require('./src/sync');
 
 const PORT = Number(process.env.PORT || 4870);
 const HOST = '127.0.0.1';
@@ -83,6 +85,30 @@ async function api(req, res, url) {
       if (scan.state.running) return send(res, 202, scan.status());
       scan.runScan().catch(() => { /* recorded in state.error */ });
       return send(res, 202, scan.status());
+    }
+  }
+
+  if (rest[0] === 'suggestions') {
+    if (!rest[1] && method === 'GET') {
+      return send(res, 200, {
+        items: suggest.list(),
+        last_claude_sync_at: db.getSetting('last_claude_sync_at', null),
+      });
+    }
+    // From the /sync-dashboard skill: { as_of, suggestions: [...] }
+    if (!rest[1] && method === 'POST') {
+      const body = await readBody(req);
+      return send(res, 201, sync.receive(body));
+    }
+    if (rest[1] === 'context' && method === 'GET') {
+      // Pretty-printed: a Claude session reads this file in pages, by line.
+      return send(res, 200, JSON.stringify(await sync.buildContext({ since: url.searchParams.get('since') }), null, 1));
+    }
+    if ((rest[1] === 'apply' || rest[1] === 'dismiss') && method === 'POST') {
+      const body = await readBody(req);
+      if (!Array.isArray(body.ids) || !body.ids.length) return send(res, 400, { error: 'ids must be a non-empty array' });
+      if (rest[1] === 'dismiss') return send(res, 200, suggest.dismiss(body.ids));
+      return send(res, 200, { results: suggest.apply(body.ids, body.edits || {}) });
     }
   }
 
@@ -184,8 +210,21 @@ async function serveStatic(req, res, url) {
   }
 }
 
+// The API serves session prompts and transcript digests, so two cheap locks:
+// - Host must be this machine's own name for the port. Stops a web page from
+//   reaching the API through a DNS name it re-pointed at 127.0.0.1.
+// - Writes must say they are JSON. A page on another site can only send
+//   text/plain or form bodies without the browser asking first, and nothing
+//   here answers that question, so a cross-site write never arrives.
+const OK_HOSTS = new Set([`localhost:${PORT}`, `127.0.0.1:${PORT}`, `[::1]:${PORT}`]);
+
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${HOST}:${PORT}`);
+  if (!OK_HOSTS.has(String(req.headers.host || '').toLowerCase())) return send(res, 403, { error: 'forbidden host' });
+  if (url.pathname.startsWith('/api/') && req.method !== 'GET'
+      && !/^application\/json\b/i.test(String(req.headers['content-type'] || ''))) {
+    return send(res, 415, { error: 'send Content-Type: application/json' });
+  }
   const handler = url.pathname.startsWith('/api/')
     ? api(req, res, url)
     : serveStatic(req, res, url);

@@ -334,6 +334,156 @@ test('the done log lists completed steps newest first with their project, and fo
   assert.deepStrictEqual(db.listDone().filter((r) => r.project_id === p.id).map((r) => r.text), ['first']);
 });
 
+console.log('\nsuggestions');
+
+const suggest = require('./suggest');
+const { commitSubject, promptText } = require('./digest');
+
+test('bad suggestions are skipped with a reason, good ones stored, and nothing is applied yet', () => {
+  const p = db.createProject({ name: 'S1', stage: 'building', steps: ['write the migration plan'] });
+  const r = suggest.offer([
+    { project_id: 999999, type: 'add_step', payload: { text: 'x' } },
+    { project_id: p.id, type: 'teleport', payload: {} },
+    { project_id: p.id, type: 'set_stage', payload: { stage: 'building' } },
+    { project_id: p.id, type: 'add_step', payload: { text: 'Write the migration plan' } },
+    { project_id: p.id, type: 'complete_step', payload: { step_id: p.steps[0].id }, reason: 'it shipped' },
+  ], 'claude');
+  assert.strictEqual(r.added, 1);
+  assert.deepStrictEqual(r.skipped.map((s) => s.index), [0, 1, 2, 3]);
+  assert.match(r.skipped[3].error, /already an open step/);
+  assert.strictEqual(db.getProject(p.id).steps[0].done, 0, 'offering must not change the project');
+});
+
+test('a suggestion offered twice, or after being dismissed, is not stored again', () => {
+  const p = db.createProject({ name: 'S2', stage: 'building' });
+  const s = { project_id: p.id, type: 'add_step', payload: { text: 'Ask Rutger for the Q3 invoices' } };
+  assert.strictEqual(suggest.offer([s], 'claude').added, 1);
+  assert.strictEqual(suggest.offer([s], 'scan').added, 0, 'same change from another source is the same suggestion');
+  const id = suggest.list().find((x) => x.project_id === p.id).id;
+  suggest.dismiss([id]);
+  assert.strictEqual(suggest.offer([s], 'claude').added, 0);
+  assert.ok(!suggest.list().some((x) => x.project_id === p.id));
+});
+
+test('applying a completion backdates it, tags the history line, and resolves the suggestion', () => {
+  const p = db.createProject({ name: 'S3', stage: 'building', steps: ['ship batch 2'] });
+  suggest.offer([{ project_id: p.id, type: 'complete_step', payload: { step_id: p.steps[0].id, done_at: '2026-09-28' } }], 'claude');
+  const s = suggest.list().find((x) => x.project_id === p.id);
+  const [res] = suggest.apply([s.id]);
+  assert.ok(res.ok, res.error);
+  const after = db.getProject(p.id);
+  assert.strictEqual(after.steps[0].done, 1);
+  assert.match(after.steps[0].done_at, /^2026-09-28/);
+  assert.ok(after.log.some((l) => l.kind === 'done' && /ship batch 2 · suggested by Claude/.test(l.text)));
+  assert.ok(!suggest.list().some((x) => x.id === s.id));
+  assert.strictEqual(suggest.apply([s.id])[0].ok, false, 'cannot be applied twice');
+});
+
+test('reworded text is what gets added', () => {
+  const p = db.createProject({ name: 'S4', stage: 'building' });
+  suggest.offer([{ project_id: p.id, type: 'add_step', payload: { text: 'draft text' } }], 'claude');
+  const s = suggest.list().find((x) => x.project_id === p.id);
+  suggest.apply([s.id], { [s.id]: { text: 'better text' } });
+  assert.strictEqual(db.getProject(p.id).next_step, 'better text');
+});
+
+test('a suggestion overtaken by a hand edit goes stale instead of showing', () => {
+  const p = db.createProject({ name: 'S5', stage: 'building', steps: ['one thing'] });
+  suggest.offer([{ project_id: p.id, type: 'complete_step', payload: { step_id: p.steps[0].id } },
+    { project_id: p.id, type: 'set_stage', payload: { stage: 'live' } }], 'claude');
+  db.updateStep(p.id, p.steps[0].id, { done: true });
+  db.updateProject(p.id, { stage: 'live' });
+  assert.ok(!suggest.list().some((x) => x.project_id === p.id));
+  assert.strictEqual(db.row("SELECT COUNT(*) AS n FROM suggestions WHERE project_id = ? AND status = 'stale'", [p.id]).n, 2);
+});
+
+test('a failed apply rolls back and leaves the suggestion open', () => {
+  const p = db.createProject({ name: 'S6', stage: 'building' });
+  suggest.offer([{ project_id: p.id, type: 'add_step', payload: { text: 'real text' } }], 'claude');
+  const s = suggest.list().find((x) => x.project_id === p.id);
+  const [res] = suggest.apply([s.id], { [s.id]: { text: '   ' } });
+  // Blank rewording falls back to the original, so this one succeeds...
+  assert.ok(res.ok);
+  // ...but a stage change to a stage that no longer validates must not half-apply.
+  db.run("INSERT INTO suggestions(project_id, type, payload, source, fingerprint) VALUES(?, 'set_stage', '{\"stage\":\"orbit\"}', 'claude', 'bad-test')", [p.id]);
+  const bad = db.row("SELECT id FROM suggestions WHERE fingerprint = 'bad-test'").id;
+  const [r2] = suggest.apply([bad]);
+  assert.strictEqual(r2.ok, false);
+  assert.strictEqual(db.row('SELECT status FROM suggestions WHERE id = ?', [bad]).status, 'open');
+  assert.strictEqual(db.getProject(p.id).stage, 'building');
+});
+
+const NOW2 = new Date('2026-10-06T12:00:00Z');
+const ago2 = (d) => new Date(NOW2.getTime() - d * 86400000).toISOString();
+const scanProject = (over = {}) => ({
+  id: 7, name: 'P', stage: 'building', stale_days: 14, review_after: null, archived: 0, created_at: ago2(60),
+  steps: [], activity: {}, ...over,
+});
+
+test('a later commit that describes an open step suggests ticking it, dated to the commit', () => {
+  const p = scanProject({
+    steps: [{ id: 1, text: 'Port Sitecap storage to Azure Blob', done: 0, created_at: ago2(10) }],
+    activity: { git: { last_at: ago2(1), detail: { recent: [
+      { hash: 'abc1234def', at: ago2(1), subject: 'Move page storage to Azure Blob for Sitecap' },
+      { hash: 'zzz', at: ago2(2), subject: 'Tidy README' },
+    ] } } },
+  });
+  const out = suggest.fromScan([p], { now: NOW2 });
+  assert.strictEqual(out.length, 1);
+  assert.strictEqual(out[0].type, 'complete_step');
+  assert.strictEqual(out[0].payload.done_at, ago2(1));
+  assert.match(out[0].evidence, /abc1234/);
+});
+
+test('a commit sharing one word, or made before the step existed, does not match', () => {
+  const p = scanProject({
+    steps: [{ id: 1, text: 'Port Sitecap storage to Azure Blob', done: 0, created_at: ago2(3) }],
+    activity: { git: { last_at: ago2(1), detail: { recent: [
+      { hash: 'a', at: ago2(1), subject: 'Azure login page copy' },
+      { hash: 'b', at: ago2(5), subject: 'Port Sitecap storage to Azure Blob' },
+    ] } } },
+  });
+  assert.deepStrictEqual(suggest.fromScan([p], { now: NOW2 }), []);
+});
+
+test('an active project silent for a month suggests pausing, unless snoozed', () => {
+  const quiet = scanProject({ activity: { fs: { last_at: ago2(40), detail: {} } } });
+  const out = suggest.fromScan([quiet], { now: NOW2 });
+  assert.strictEqual(out.length, 1);
+  assert.strictEqual(out[0].payload.stage, 'paused');
+  const snoozed = scanProject({ review_after: '2026-10-20', activity: { fs: { last_at: ago2(40), detail: {} } } });
+  assert.deepStrictEqual(suggest.fromScan([snoozed], { now: NOW2 }), []);
+  const recent = scanProject({ activity: { fs: { last_at: ago2(10), detail: {} } } });
+  assert.deepStrictEqual(suggest.fromScan([recent], { now: NOW2 }), []);
+});
+
+test('a paused project with fresh commits suggests building, but file times alone do not', () => {
+  const back = scanProject({ stage: 'paused', activity: { git: { last_at: ago2(1), detail: { last_commit_subject: 'Resume work' } } } });
+  const out = suggest.fromScan([back], { lastStageChange: new Map([[7, ago2(20)]]), now: NOW2 });
+  assert.strictEqual(out.length, 1);
+  assert.strictEqual(out[0].payload.stage, 'building');
+  const synced = scanProject({ stage: 'paused', activity: { fs: { last_at: ago2(0), detail: {} } } });
+  assert.deepStrictEqual(suggest.fromScan([synced], { now: NOW2 }), []);
+  // Work before the pause decision is why it was paused, not a reason to resume.
+  const old = scanProject({ stage: 'paused', activity: { git: { last_at: ago2(2), detail: {} } } });
+  assert.deepStrictEqual(suggest.fromScan([old], { lastStageChange: new Map([[7, ago2(1)]]), now: NOW2 }), []);
+});
+
+test('commit messages are read from heredocs, here-strings and -m', () => {
+  assert.strictEqual(commitSubject("git commit -m \"$(cat <<'EOF'\nAdd a Done view\n\nBody\nEOF\n)\""), 'Add a Done view');
+  assert.strictEqual(commitSubject("git commit -m @'\nFix the Amica double count\n'@"), 'Fix the Amica double count');
+  assert.strictEqual(commitSubject('git -C "x y" commit -m "Short one"'), 'Short one');
+  assert.strictEqual(commitSubject('git status'), null);
+});
+
+test('session digests keep what Matt typed and drop injected context', () => {
+  assert.strictEqual(promptText({ message: { content: 'pick up the AR tracker' } }), 'pick up the AR tracker');
+  assert.strictEqual(promptText({ message: { content: '<command-name>/model</command-name>' } }), null);
+  assert.strictEqual(promptText({ isMeta: true, message: { content: 'Caveat: ...' } }), null);
+  assert.strictEqual(promptText({ message: { content: [{ type: 'tool_result', content: 'x' }] } }), null);
+  assert.strictEqual(promptText({ message: { content: [{ type: 'text', text: '<system-reminder>x</system-reminder>' }, { type: 'text', text: 'real ask' }] } }), 'real ask');
+});
+
 // Tidy up the throwaway database.
 try { db.open().close(); } catch { /* already closed */ }
 for (const suffix of ['', '-wal', '-shm', '-journal']) {
