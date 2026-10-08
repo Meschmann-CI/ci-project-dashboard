@@ -189,7 +189,7 @@ const SEED = [
     name: 'Project Dashboard',
     kind: 'tool',
     summary: 'This board. Stage and next step by hand, everything else from git, file mtimes and Claude transcripts.',
-    path: 'CI Web Apps/Project Dashboard/project-dashboard-app',
+    path: 'CI Web Apps/My Project Dashboard/project-dashboard-app',
     port: 4870,
     stage: 'testing',
     priority: 2,

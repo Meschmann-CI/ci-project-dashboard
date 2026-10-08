@@ -190,7 +190,7 @@ Transcripts contain client material and occasionally PII. The dashboard stores o
 ## Layout
 
 ```
-CI Web Apps/Project Dashboard/project-dashboard-app/
+CI Web Apps/My Project Dashboard/project-dashboard-app/
   server.js           http server + API routes + scan job guard
   src/db.js           schema, migrations, data access
   src/scan.js         git, fs, and transcript scanners (all async)
