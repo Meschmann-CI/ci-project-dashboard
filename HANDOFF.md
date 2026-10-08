@@ -14,16 +14,21 @@ Read this first, then `ARCHITECTURE.md` (the design, with review notes) and `REA
 - Suggested tab (added 2026-10-06): scan rules in `src/suggest.js` plus the `/sync-dashboard`
   skill. The skill's source is `claude-skill/sync-dashboard/SKILL.md`; the installed copy is at
   `~/.claude/skills/sync-dashboard/`. Keep the two in step.
-- 22 project rows in the live DB as of 2026-10-08. One has a dead path: "Video screenshot
-  extraction" points at `Video Test`, which no longer exists.
+- 23 project rows in the live DB as of 2026-10-08, every path verified. Paths were updated
+  through the API when the workspace was regrouped (Tools/, Claude Projects/, Archive/). "UX Lab
+  Broadcast" and "Video screenshot extraction" are archived with no path. The row named "CI Web
+  Tools" points at the Process Mapper v2 app on purpose (the v1 tools repo is no longer the git
+  signal), so its name is misleading.
 
 ## Next actions
 
-1. Fix or archive the "Video screenshot extraction" row (path `Video Test` is gone).
+1. Rename the "CI Web Tools" row to Process Mapper, or split it, so the name matches the path.
 2. Consider rows for the tools with none: Sitecap Bridge, the toolkit, Panel Management
    Platform, Soho ticket tracker, the Web Monitor guide (it is a marker on "Website change
    monitoring" today).
-3. Restart the live server after any `server.js` or `src/` change (see the recipe below).
+3. README.md still describes the pre-redesign UI (emoji icons, segment bars, pulses, snoozed
+   Lab Broadcast). Rewrite it against the Mission Control build.
+4. Restart the live server after any `server.js` or `src/` change (see the recipe below).
 
 ## Traps
 
@@ -52,7 +57,8 @@ Read this first, then `ARCHITECTURE.md` (the design, with review notes) and `REA
 - The browser pane is about 520 px wide; screenshots for review pages come from headless Edge
   over CDP, and leftover Edge processes must be killed by their private profile path.
 - The three Sep 8-9 completions were re-dated to 2026-09-14 at Matt's request so launch week
-  counted. Deliberate; do not restore. Snapshot `data/dashboard-before-redate-20260917-2111.db`.
+  counted. Deliberate; do not restore. (The pre-change snapshot was deleted 2026-10-08 with
+  the other September snapshots; a 'system' log row per project records the original dates.)
 
 ## Decisions not to reopen
 
@@ -77,7 +83,7 @@ Read this first, then `ARCHITECTURE.md` (the design, with review notes) and `REA
 server.js                http server, API routes, scan job guard
 src/db.js                schema, migrations, KIND_INFO, GLYPHS, steps, syncNextStep
 src/attention.js         pure rules engine for the Needs you queue
-src/scan-*.js            git, fs mtime and Claude transcript scanners
+src/scan.js              git, fs mtime and Claude transcript scanners
 src/suggest.js           Suggested tab rules
 src/seed.js              first-run project list (paths drift; the live DB is the truth)
 public/app.js, glyphs.js, styles.css
