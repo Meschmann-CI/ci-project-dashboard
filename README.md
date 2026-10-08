@@ -1,10 +1,10 @@
-# CI Project Dashboard
+# Mission Control (CI Project Dashboard)
 
-Every tool and project in flight, in one place: what stage it is at, what the next step is, and what needs attention. Port 4870.
+Every tool and project in flight, in one place: what stage it is at, what the next step is, and what needs attention. Port 4870. Matt's personal board; the folder is still called `project-dashboard-app` and the launcher `Start Project Dashboard.bat`. Current state, traps and closed decisions are in `HANDOFF.md`; the design is in `ARCHITECTURE.md`.
 
 ## Running it
 
-Double-click **`Start Project Dashboard.bat`**, the same as the other CI apps. It seeds the database on first run, opens your browser, and keeps the server up until you close the window. Running it a second time notices the dashboard is already up and just opens the browser.
+Double-click **`Start Project Dashboard.bat`** (or `Start Mission Control (Dashboard).bat` at the `CI Web Apps` root, which calls it), the same as the other CI apps. It seeds the database on first run, opens your browser, and keeps the server up until you close the window. Running it a second time notices the dashboard is already up and just opens the browser.
 
 No dependencies and no `npm install`. Node 22 or newer, for the built-in `node:sqlite`.
 
@@ -59,9 +59,7 @@ The definitions are on screen, not just here. Hover a filter chip at the top for
 
 One honest wrinkle: **Personal** is a different axis from the other five. A personal project is also a tool. It stays a kind because there's exactly one of them, and a separate "is this CI work" flag would cost a column and a filter to serve a single row. If personal work grows, that's the time to split it out.
 
-Each tile has its own emoji and colour, a stage pill, the next step, a five-segment progress bar (idea to live), and three "pulses" showing how recently git, Claude and the files themselves showed signs of life. A red badge in the corner counts how many rules are firing for that project, so the whole board reads at a glance. The "New project" tile sits at the end of In motion.
-
-Click a tile for the detail panel: the checklist, stage as clickable pills, priority, waiting-on and snooze, the evidence behind each signal, per-rule mute switches, an icon and colour picker, folder and port, transcript markers, notes, and an automatic history. Click the name to rename it.
+New projects start from the **New project** button in the header or the card at the end of In motion. Inside a project, click the name to rename it; the icon at the top opens the glyph and colour picker; priority, waiting-on, snooze, the evidence behind each signal, per-rule mutes, folder, port and transcript markers all live in the folded rows under the timeline.
 
 ## The checklist
 
@@ -78,7 +76,7 @@ When the last open step is checked off, the tile goes back to "Needs a next step
 
 Under the hood, steps live in their own table and `projects.next_step` is a cached mirror of the top open one, kept in sync on every change. The attention rules never needed to learn about checklists. The old single-string `next_step` values were migrated into one step each on first start.
 
-Three other views sit behind the toggle. **Needs you** is the full attention queue as a list. **Board** is a kanban by stage with drag-and-drop. **Done** is the running record of everything you have ticked off, across every project, so progress is visible rather than just the backlog. The view you leave it on is remembered.
+Four other tabs sit beside Home. **Needs you** is the attention queue, one card per project with the actions that clear it. **Board** is a kanban by stage with drag-and-drop. **Wins** is the running record of everything you have ticked off, across every project, so progress is visible rather than just the backlog. **Suggested** holds changes proposed from work that happened outside the app. The tab you leave it on is remembered.
 
 ## Wins
 
@@ -113,7 +111,7 @@ The board shows the newest of the three. The detail drawer shows all of them wit
 
 ## The attention queue
 
-The top of the page is a queue, not a board. A project appears when a rule fires:
+**Needs you** is a queue, not a board. A project appears when a rule fires:
 
 | rule | severity | fires when |
 |---|---|---|
@@ -130,11 +128,11 @@ The Needs you tab shows one card per project with every reason it is there, most
 
 Warnings sort above chores because uncommitted work is a data-loss risk. `paused` and `done` silence the `act` rules but not the warnings.
 
-**Snooze** (`review_after`) silences `stale`, `no-next-step` and `no-remote` until a date. Use it for deliberately parked work: Lab Broadcast is snoozed to 2026-10-08 pending the Zoom Webinar decision.
+**Snooze** (`review_after`) silences `stale`, `no-next-step` and `no-remote` until a date. Use it for deliberately parked work that is waiting on a decision; the Needs you card offers "Snooze 2 weeks" directly.
 
-**Mute** turns off one rule for one project permanently, via the checkboxes in the detail drawer. Two are muted at seed time, both on purpose:
+**Mute** turns off one rule for one project permanently, from the reason on its Needs you card or the Signals row in the project. Two are muted at seed time, both on purpose:
 
-- Sandbagger's `unpushed`, because the 9-commit hold is deliberate until Netlify credits refresh.
+- Sandbagger's `unpushed`, because pushes there are batched on purpose (Netlify credits), so commits ahead of origin are normal.
 - Vendor Contracts' `no-remote`, because you declined a repo for it.
 
 Muting matters more than it looks. A queue carrying a permanent false alarm is a queue you learn to ignore.
@@ -143,7 +141,7 @@ Muting matters more than it looks. A queue carrying a permanent false alarm is a
 
 Most work happens in Claude sessions, not in this app, so the checklist and stages fall behind. The **Suggested** tab holds proposed changes drawn from that outside work. Each one shows the change, a one-line reason, and the evidence (a commit, a session date and quote, or a memory note). Tick the right ones and press **Apply selected**. Step and history wording can be edited before applying. Dismissed suggestions never come back. Nothing changes a project until it is applied, and every applied change is tagged in History as "suggested by Claude" or "suggested by scan".
 
-Five kinds: tick off a step, add a step, change stage, add a history entry, set or clear waiting-on. A completion is dated to when the work happened, so the Done view credits the right day.
+Five kinds: tick off a step, add a step, change stage, add a history entry, set or clear waiting-on. A completion is dated to when the work happened, so Wins credits the right day.
 
 Two sources feed it:
 
