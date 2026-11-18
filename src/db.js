@@ -328,6 +328,9 @@ function safeJson(s, fallback = {}) {
 // Open steps first in their order, then completed ones newest first.
 const STEP_ORDER = 'ORDER BY done, CASE WHEN done THEN done_at END DESC, sort, id';
 
+// Lazy, because markers.js is pure and db.js loads first everywhere.
+const withAutoMarkers = (ps) => require('./markers').withAutoMarkers(ps, workspaceRoot());
+
 function listProjects({ includeArchived = false } = {}) {
   const where = includeArchived ? '' : 'WHERE archived = 0';
   const ps = rows(`SELECT * FROM projects ${where} ORDER BY priority, sort, name`).map(hydrate);
@@ -344,7 +347,11 @@ function listProjects({ includeArchived = false } = {}) {
     const p = byId.get(s.project_id);
     if (p) p.steps.push(s);
   }
-  return [...byId.values()];
+  // Paths of every project, archived too, so a shared parent folder is spotted.
+  const all = [...byId.values()];
+  const others = includeArchived ? [] : rows('SELECT id, path FROM projects WHERE archived = 1');
+  withAutoMarkers([...all, ...others]);
+  return all;
 }
 
 function getProject(id) {
@@ -356,6 +363,7 @@ function getProject(id) {
   }
   p.markers = rows('SELECT marker FROM markers WHERE project_id = ? ORDER BY marker', [id]).map((r) => r.marker);
   p.steps = rows(`SELECT * FROM steps WHERE project_id = ? ${STEP_ORDER}`, [id]);
+  withAutoMarkers([p, ...rows('SELECT id, path FROM projects WHERE id != ?', [id])]);
   p.log = rows('SELECT * FROM log WHERE project_id = ? ORDER BY at DESC, id DESC LIMIT 100', [id]);
   return p;
 }

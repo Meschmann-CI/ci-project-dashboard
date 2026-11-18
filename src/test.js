@@ -516,6 +516,36 @@ test('session digests keep what Matt typed and drop injected context', () => {
   assert.strictEqual(promptText({ message: { content: [{ type: 'text', text: '<system-reminder>x</system-reminder>' }, { type: 'text', text: 'real ask' }] } }), 'real ask');
 });
 
+
+console.log('\nautomatic markers');
+const { autoMarkers, repoName, withAutoMarkers } = require('./markers');
+const WS = 'C:/Users/x/Desktop/AI Training Tool for CI';
+test("a project folder and its app folder become markers", () => {
+  assert.deepStrictEqual(autoMarkers("CI Web Apps/Next-Gen Benchmark", { is_repo: true, repo_dir: "next-gen-benchmark-app", remote: "https://github.com/Corporate-Insight/Next-Gen-Benchmark.git" }, [], WS),
+    ["Next-Gen Benchmark", "next-gen-benchmark-app", "Next-Gen-Benchmark"]);
+});
+test("grouping folders, short names and workspace names are never markers", () => {
+  assert.deepStrictEqual(autoMarkers("Tools/Soho/Sharepoint Upgrade Tracker", null, [], WS), ["Sharepoint Upgrade Tracker"]);
+  assert.deepStrictEqual(autoMarkers("CI Web Apps/Project Management Tool", null, [], WS), ["Project Management Tool"]);
+  assert.deepStrictEqual(autoMarkers("Desktop", null, [], WS), []);
+});
+test("a parent folder two projects share is left out", () => {
+  assert.deepStrictEqual(autoMarkers("Tools/Shared Parent/app-one", null, ["Tools/Shared Parent/app-two"], WS), ["app-one"]);
+});
+test('an automatic marker overlapping a typed one is dropped, so hits are not counted twice', () => {
+  const ps = withAutoMarkers([{ id: 1, path: 'CI Web Apps/Binder Viewer/binder-viewer-app', markers: ['binder-viewer', 'Binder Viewer'] }], WS);
+  assert.deepStrictEqual(ps[0].auto_markers, []);
+});
+test("repo names come from https and ssh remotes", () => {
+  assert.strictEqual(repoName("git@github.com:Meschmann-CI/ci-project-dashboard.git"), "ci-project-dashboard");
+  assert.strictEqual(repoName("https://github.com/Corporate-Insight/ci-ar-tracker"), "ci-ar-tracker");
+});
+test("automatic markers attribute a session like typed ones", () => {
+  const p = [{ id: 1, markers: [], match_markers: ["next-gen-benchmark-app"] }];
+  const out = scan.rollUpClaude(p, [{ file: "f", session_end: NOW.toISOString(), hits: { "next-gen-benchmark-app": { strong: 40, weak: 0, last_ts: NOW.toISOString() } } }], NOW.getTime());
+  assert.strictEqual(out.get(1).sessions, 1);
+});
+
 // Tidy up the throwaway database.
 try { db.open().close(); } catch { /* already closed */ }
 for (const suffix of ['', '-wal', '-shm', '-journal']) {

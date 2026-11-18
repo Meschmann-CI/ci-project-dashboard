@@ -10,6 +10,7 @@ const os = require('node:os');
 const readline = require('node:readline');
 const db = require('./db');
 const suggest = require('./suggest');
+const { withAutoMarkers } = require('./markers');
 
 const FS_IGNORE = new Set(['node_modules', '.git', 'data', 'uploads', '.next', 'dist', 'build', '.cache']);
 const FS_MAX_DEPTH = 6;
@@ -34,7 +35,8 @@ const MIN_SHARE = 0.25;     // and the share of the session it must represent
 const STRONG_WEIGHT = 3;    // a tool call counts for three mentions in prose
 
 const BIG_LINE = 1_000_000;
-const RECENT_COMMITS = 60;
+// Busy repos land ten commits a day; the sync reads these, so a week is too few.
+const RECENT_COMMITS = 200;
 const RECENT_DAYS = 30;
 
 // ---------------------------------------------------------------- job state
@@ -80,16 +82,42 @@ function samePath(a, b) {
   return process.platform === 'win32' ? x.toLowerCase() === y.toLowerCase() : x === y;
 }
 
+// A project folder that is not a repo itself but holds exactly one app folder
+// that is (CI Web Apps/Next-Gen Benchmark/next-gen-benchmark-app). The repo is
+// the project's, so scan it rather than report "not a git repo".
+async function childRepo(absPath) {
+  let entries = [];
+  try { entries = await fsp.readdir(absPath, { withFileTypes: true }); } catch { return null; }
+  const found = [];
+  for (const e of entries) {
+    if (!e.isDirectory() || e.name.startsWith('.') || FS_IGNORE.has(e.name)) continue;
+    try { await fsp.stat(path.join(absPath, e.name, '.git')); found.push(e.name); } catch { /* not a repo */ }
+  }
+  return found.length === 1 ? found[0] : null;
+}
+
 async function scanGit(absPath) {
+  const notRoot = async (extra) => {
+    const child = await childRepo(absPath);
+    if (child) {
+      const g = await scanGitRoot(path.join(absPath, child));
+      if (g && g.is_repo) return { ...g, repo_dir: child };
+    }
+    return { is_repo: false, ...extra };
+  };
   const inTree = (await git(absPath, ['rev-parse', '--is-inside-work-tree']) || '').trim() === 'true';
-  if (!inTree) return { is_repo: false };
+  if (!inTree) return notRoot({});
+  return scanGitRoot(absPath, notRoot);
+}
+
+async function scanGitRoot(absPath, notRoot = async (extra) => ({ is_repo: false, ...extra })) {
 
   // git walks up, so a plain folder inside the workspace repo answers "yes" and
   // then reports the workspace's commits and dirty files as its own. Only treat
   // it as a repo when this folder is the repo root.
   const top = (await git(absPath, ['rev-parse', '--show-toplevel']) || '').trim();
   if (!top || !samePath(top, absPath)) {
-    return { is_repo: false, inside_repo: top ? top.replace(/\\/g, '/') : null };
+    return notRoot({ inside_repo: top ? top.replace(/\\/g, '/') : null });
   }
 
   const [logOut, remote, aheadOut, modifiedOut, untrackedOut, branch, recentOut] = await Promise.all([
@@ -327,8 +355,12 @@ async function runScan() {
 
     // ---- transcripts
     const claudeEnabled = db.getSetting('claude_scan_enabled', '1') === '1';
-    const markers = db.allMarkers();
-    const version = db.markersVersion();
+    // Typed markers plus the ones the folder and repo give, from this scan's git
+    // results, so a path or remote changed a minute ago already counts.
+    const gitNow = new Map(folderResults.map((r) => [r.p.id, r.git]));
+    withAutoMarkers(projects, root, (p) => gitNow.get(p.id) || null);
+    const markers = [...new Set(projects.flatMap((p) => p.match_markers))].sort();
+    const version = require('node:crypto').createHash('sha1').update(markers.join("|")).digest('hex').slice(0, 12);
     let perProjectClaude = new Map();
 
     if (claudeEnabled && markers.length) {
@@ -433,7 +465,7 @@ function perFileScores(projects, cacheRows) {
       let s = 0;
       let w = 0;
       let ts = null;
-      for (const m of p.markers) {
+      for (const m of p.match_markers || p.markers) {
         const h = r.hits[m];
         if (!h) continue;
         s += h.strong;
@@ -472,7 +504,7 @@ function rollUpClaude(projects, cacheRows, now = Date.now()) {
   const perFile = perFileScores(projects, cacheRows);
 
   for (const p of projects) {
-    if (!p.markers.length) continue;
+    if (!(p.match_markers || p.markers).length) continue;
     let sessions = 0;
     let strong = 0;
     let weak = 0;

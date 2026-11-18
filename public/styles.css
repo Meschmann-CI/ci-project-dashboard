@@ -482,6 +482,7 @@ main { max-width: 1500px; margin: 0 auto; padding: 0 36px 80px; }
   background: var(--paper-2); font-weight: 700; font-size: 12.5px;
 }
 .mchip button { border: 0; background: transparent; font-size: 15px; line-height: 1; padding: 0 3px; color: var(--ink-2); }
+.mchip.auto { background: transparent; border: 1px dashed var(--ink-2); color: var(--ink-2); padding-right: 10px; }
 
 .logs { display: grid; }
 .logrow { display: grid; grid-template-columns: 78px 1fr; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13px; }

@@ -845,7 +845,7 @@ function renderDrawer(p) {
   folds.appendChild(fold(p, 'details', 'Details', detailsPreview(p), () => detailsBody(p)));
   const firing = (p.flags || []).filter((f) => !f.suppressed).length;
   folds.appendChild(fold(p, 'signals', 'Signals and nags', firing ? `${firing} nag${firing === 1 ? '' : 's'} firing` : 'nothing firing', () => signalsBody(p)));
-  folds.appendChild(fold(p, 'where', 'Where it lives', `${p.path || 'no folder'} · ${p.markers.length} marker${p.markers.length === 1 ? '' : 's'}`, () => whereBody(p)));
+  folds.appendChild(fold(p, 'where', 'Where it lives', `${p.path || 'no folder'} · ${(p.match_markers || p.markers).length} marker${(p.match_markers || p.markers).length === 1 ? '' : 's'}`, () => whereBody(p)));
   folds.appendChild(fold(p, 'notes', 'Notes', (p.notes || '').split('\n')[0] || 'none yet', () => { const w = el('div'); w.appendChild(textarea(p.notes, (v) => patch(p.id, { notes: v }))); return w; }));
   body.appendChild(folds);
 
@@ -1081,8 +1081,9 @@ function whereBody(p) {
 
   const mf = el('div', 'field'); mf.appendChild(el('label', null, 'Transcript markers'));
   const chips = el('div', 'chipsrow');
+  for (const m of p.auto_markers || []) { const c = el('span', 'mchip auto'); c.title = 'From the folder or repo name. Follows the path automatically.'; c.appendChild(el('span', null, m)); chips.appendChild(c); }
   for (const m of p.markers) { const c = el('span', 'mchip'); c.appendChild(el('span', null, m)); const x = el('button', null, '×'); x.setAttribute('aria-label', `Remove marker ${m}`); x.addEventListener('click', () => patch(p.id, { markers: p.markers.filter((y) => y !== m) })); c.appendChild(x); chips.appendChild(c); }
-  if (!p.markers.length) chips.appendChild(el('span', 'hint', 'No markers, so Claude sessions cannot be matched.'));
+  if (!p.markers.length && !(p.auto_markers || []).length) chips.appendChild(el('span', 'hint', 'No markers, so Claude sessions cannot be matched. Set a folder and its name is used.'));
   mf.appendChild(chips);
   const addM = input('', null); addM.placeholder = 'Add a marker, press Enter';
   addM.addEventListener('keydown', (e) => { if (e.key === 'Enter' && addM.value.trim()) { e.preventDefault(); patch(p.id, { markers: [...p.markers, addM.value.trim()] }); } });
@@ -1257,6 +1258,7 @@ function gitEvidence(g) {
   if (g.last_commit_subject) bits.push(`<b>“${escapeHtml(g.last_commit_subject)}”</b>`);
   const c = []; if (g.ahead) c.push(`${g.ahead} ahead`); if (g.modified) c.push(`${g.modified} modified`); if (g.untracked) c.push(`${g.untracked} untracked`); if (!g.has_upstream) c.push('no upstream');
   if (c.length) bits.push(c.join(', '));
+  if (g.repo_dir) bits.push(`repo in <i>${escapeHtml(g.repo_dir)}/</i>`);
   if (g.remote) bits.push(escapeHtml(g.remote.replace(/^https:\/\/github\.com\//, '').replace(/\.git$/, '')));
   return bits.join(' · ') || 'clean';
 }

@@ -2,7 +2,21 @@
 
 Read this first, then `ARCHITECTURE.md` (the design, with review notes) and `README.md`.
 
-## Current state, 2026-10-08
+## Current state, 2026-11-18
+
+- **Automatic markers (2026-11-18).** A project's folder name, its parent folder (unless another
+  project shares it or it is a grouping folder like CI Web Apps), the app folder holding its repo,
+  and its GitHub repo name now count as transcript markers on top of the typed ones
+  (`src/markers.js`). They follow the path and remote, so a project added with the New project
+  form is matched without anyone typing markers. Why: the Next-Gen Benchmark row was created
+  2026-10-07 with no markers and a parent-folder path, so five weeks and 300+ commits never
+  reached the sync. Automatic markers that overlap a typed one are dropped so hits are not
+  counted twice. The edit panel shows them as dashed chips.
+- **Child repo resolution.** A project folder that is not a repo but holds exactly one repo folder
+  is scanned as that repo (`repo_dir` in the git detail).
+- The git scanner keeps the last 200 commits in 30 days (was 60, about a week for Benchmark).
+
+## State as of 2026-10-08
 
 - Live on port 4870, launched by `Start Project Dashboard.bat`, launch.json `project-dashboard`.
   Repo `Meschmann-CI/ci-project-dashboard` on Matt's personal account (his choice; it is a
@@ -85,6 +99,7 @@ src/db.js                schema, migrations, KIND_INFO, GLYPHS, steps, syncNextS
 src/attention.js         pure rules engine for the Needs you queue
 src/scan.js              git, fs mtime and Claude transcript scanners
 src/suggest.js           Suggested tab rules
+src/markers.js           automatic markers from path, repo folder and remote
 src/seed.js              first-run project list (paths drift; the live DB is the truth)
 public/app.js, glyphs.js, styles.css
 claude-skill/sync-dashboard/SKILL.md   source of the /sync-dashboard skill
